@@ -455,6 +455,39 @@ TEST_CASE("moduleinfo is scanned without loading and a hang is blacklisted") {
     fs::remove_all(bundle);
 }
 
+#if !defined(_WIN32)
+TEST_CASE("a scanner name keeps no carriage return") {
+    const auto dir = fs::temp_directory_path();
+    const auto script = dir / "ghovlz-cr-scan.sh";
+    const auto bundle = dir / "ghovlz-cr-plugin.vst3";
+    const auto blacklist = dir / "ghovlz-cr-black.txt";
+    {
+        std::ofstream out(script);
+        out << "#!/bin/sh\nprintf 'NAME\\tListed Synth\\r\\nOK\\r\\n'\n";
+    }
+    fs::permissions(script, fs::perms::owner_read | fs::perms::owner_write | fs::perms::owner_exec);
+    fs::remove_all(bundle);
+    fs::create_directories(bundle);
+    fs::remove(blacklist);
+    fs::remove(fs::path(blacklist.string() + ".scan"));
+    PluginHost host;
+    host.setScannerExecutable(script.string());
+    host.setBlacklistFile(blacklist.string());
+    std::string error;
+    const bool scanned = host.scan(bundle.string(), error);
+    INFO(error);
+    REQUIRE(scanned);
+    REQUIRE(host.lastName() == "Listed Synth");
+    host.setScannerExecutable("/no/such/scanner");
+    REQUIRE(host.scan(bundle.string(), error));
+    REQUIRE(host.lastName() == "Listed Synth");
+    fs::remove(script);
+    fs::remove_all(bundle);
+    fs::remove(blacklist);
+    fs::remove(fs::path(blacklist.string() + ".scan"));
+}
+#endif
+
 TEST_CASE("test synth notes land once and state reaches the controller") {
     const fs::path bundle = findUp("GHOVLZ Test Synth.vst3");
     if (bundle.empty())

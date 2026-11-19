@@ -556,13 +556,21 @@ void PluginHost::setBlacklistFile(std::string path) { blacklist_ = std::move(pat
 bool PluginHost::isBlacklisted(const std::string& pluginPath) const {
     std::ifstream in(blacklist_);
     std::string line;
-    while (std::getline(in, line))
+    while (std::getline(in, line)) {
+        if (!line.empty() && line.back() == '\r')
+            line.pop_back();
         if (line == pluginPath)
             return true;
+    }
     return false;
 }
 
 namespace {
+void stripCr(std::string& line) {
+    if (!line.empty() && line.back() == '\r')
+        line.pop_back();
+}
+
 std::string cacheStamp(const std::string& path) {
     std::error_code ec;
     const auto when = std::filesystem::last_write_time(path, ec).time_since_epoch().count();
@@ -591,12 +599,14 @@ bool PluginHost::scan(const std::string& pluginPath, std::string& error) {
         std::ifstream cache(cachePath);
         std::string line;
         while (std::getline(cache, line)) {
+            stripCr(line);
             const auto t1 = line.find('\t');
             const auto t2 = t1 == std::string::npos ? std::string::npos : line.find('\t', t1 + 1);
             if (t1 == std::string::npos || t2 == std::string::npos)
                 continue;
             if (line.substr(0, t1) == pluginPath && line.substr(t1 + 1, t2 - t1 - 1) == stamp) {
                 lastName_ = line.substr(t2 + 1);
+                stripCr(lastName_);
                 return true;
             }
         }
@@ -613,6 +623,9 @@ bool PluginHost::scan(const std::string& pluginPath, std::string& error) {
     std::istringstream lines(output);
     std::string line;
     while (std::getline(lines, line)) {
+        // The scanner is a text-mode process. On Windows its newline is CRLF,
+        // and the pipe is read as bytes, so getline keeps the CR.
+        stripCr(line);
         if (line.rfind("NAME\t", 0) == 0)
             lastName_ = line.substr(5);
     }
