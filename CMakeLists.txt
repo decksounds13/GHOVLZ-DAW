@@ -198,6 +198,12 @@ if(GHOVLZ_WITH_ASIO)
     target_sources(GhovlzDAW PRIVATE
         "${_ghovlz_asio}/host/asiodrivers.cpp"
         "${_ghovlz_asio}/host/pc/asiolist.cpp")
+    set(_ghovlz_asio_prefix "${CMAKE_SOURCE_DIR}/src/audio/asio_host_prefix.h")
+    set_source_files_properties(
+        "${_ghovlz_asio}/host/asiodrivers.cpp"
+        "${_ghovlz_asio}/host/pc/asiolist.cpp"
+        TARGET_DIRECTORY GhovlzDAW
+        PROPERTIES COMPILE_OPTIONS "/UUNICODE;/U_UNICODE;/FI${_ghovlz_asio_prefix}")
     message(STATUS "ASIO backend enabled from ${_ghovlz_asio}")
 endif()
 if(UNIX AND NOT APPLE)

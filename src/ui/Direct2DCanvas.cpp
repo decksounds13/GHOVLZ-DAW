@@ -178,7 +178,7 @@ public:
         if (it == shadows_.end()) {
             ComPtr<ID2D1BitmapRenderTarget> rt;
             D2D1_SIZE_F sz = D2D1::SizeF(std::max(1.f, r.w), std::max(1.f, r.h));
-            if (FAILED(dc_->CreateCompatibleRenderTarget(&sz, &rt))) {
+            if (FAILED(dc_->CreateCompatibleRenderTarget(sz, &rt))) {
                 fillRoundRect({r.x, r.y + 4, r.w, r.h}, radius, color);
                 return;
             }

@@ -6,8 +6,10 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#include <objbase.h>
 #include <avrt.h>
 
+#include "asiosys.h"
 #include "asio.h"
 #include "asiodrivers.h"
 
@@ -136,7 +138,8 @@ std::string AsioBackend::open(Engine* engine, const std::string& device, int sam
         bufferFrames = minSize;
     if (maxSize > 0 && bufferFrames > maxSize)
         bufferFrames = maxSize;
-    ASIOSetSampleRate(sampleRate > 0 ? sampleRate : 48000);
+    const double rate = sampleRate > 0 ? static_cast<double>(sampleRate) : 48000.0;
+    ASIOSetSampleRate(static_cast<ASIOSampleRate>(rate));
     int n = 0;
     for (int c = 0; c < inputCount; ++c, ++n) {
         infos[n].isInput = ASIOTrue;
