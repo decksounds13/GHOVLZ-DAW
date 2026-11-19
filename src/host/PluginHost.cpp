@@ -776,6 +776,24 @@ bool PluginHost::openEditor(Device& device, void* parent, EditorAttach& out, std
     return true;
 }
 
+bool PluginHost::resizeEditor(Device& device, int width, int height, std::string& error) {
+    auto* vst = dynamic_cast<Vst3Device*>(&device);
+    if (!vst || !vst->view) {
+        error = "no editor";
+        return false;
+    }
+    Steinberg::ViewRect rect;
+    rect.left = 0;
+    rect.top = 0;
+    rect.right = width;
+    rect.bottom = height;
+    if (vst->view->onSize(&rect) != Steinberg::kResultOk) {
+        error = "resize failed";
+        return false;
+    }
+    return true;
+}
+
 void PluginHost::closeEditor(Device& device) {
     auto* vst = dynamic_cast<Vst3Device*>(&device);
     if (!vst || !vst->view)

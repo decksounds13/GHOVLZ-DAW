@@ -118,6 +118,10 @@ struct Project {
     std::vector<Track> tracks;
     std::vector<Lane> automation;
     std::map<std::string, MediaPtr> media;
+    // UI-24. When set, this document wins over the profile theme. Omitted from JSON when off,
+    // so projects that never set it stay byte-identical.
+    bool themeOverride = false;
+    std::string themeDocument;
 
     Track* findTrack(const std::string& id);
     const Track* findTrack(const std::string& id) const;

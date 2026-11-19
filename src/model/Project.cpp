@@ -243,6 +243,14 @@ bool Project::saveToFolder(const std::string& folder) const {
                  {"scenes", scenes}, {"markers", markersJ}, {"macros", macrosJ},
                  {"master", trackJson(master)}, {"tracks", tracksJ},
                  {"automation", lanes}, {"media", mediaList}};
+    if (themeOverride && !themeDocument.empty()) {
+        root["themeOverride"] = true;
+        try {
+            root["theme"] = json::parse(themeDocument);
+        } catch (...) {
+            root["theme"] = themeDocument;
+        }
+    }
     std::ofstream o(folder + "/project.json");
     if (!o) return false;
     o << root.dump(2);
@@ -276,6 +284,10 @@ bool Project::loadFromFolder(const std::string& folder) {
         format = 2;
     missingMedia.clear();
     name = root.value("name", "Untitled");
+    themeOverride = root.value("themeOverride", false);
+    themeDocument.clear();
+    if (themeOverride && root.contains("theme"))
+        themeDocument = root["theme"].dump();
     bpm = root.value("bpm", 120.0);
     if (root.contains("timeSignature") && root["timeSignature"].size() == 2) {
         numerator = root["timeSignature"][0].get<int>();
@@ -457,7 +469,9 @@ Project Project::makeShowcase() {
     lead->devices.push_back(dev("d-flt", "filter", "Filter"));
     lead->devices.back().params = {{"cutoff", 1800.f}, {"reso", 1.4f}, {"mix", 0.85f}};
     lead->devices.push_back(dev("d-sat", "saturator", "Saturator"));
-    lead->devices.back().params = {{"drive", 12.f}, {"tone", 0.15f}, {"mix", 0.7f}};
+    lead->devices.back().params = {{"drive", 12.f}, {"tone", 0.15f}, {"mix", 0.7f}, {"out", 0.5f}};
+    lead->devices.push_back(dev("d-leq", "eq", "EQ"));
+    lead->devices.back().params = {{"low", 0.42f}, {"mid", 0.66f}, {"high", 0.38f}, {"gain", 1.5f}};
     pads->devices.push_back(dev("d-pad", "wavetable", "Wavetable"));
     vox->devices.push_back(dev("d-veq", "eq", "EQ Eight"));
     retA->devices.push_back(dev("d-rev", "reverb", "Reverb"));

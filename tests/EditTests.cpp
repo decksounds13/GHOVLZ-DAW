@@ -4,6 +4,7 @@
 #include "model/Project.h"
 #include "model/Undo.h"
 #include "ui/ColourDice.h"
+#include "ui/Theme.h"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -20,6 +21,9 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#else
+#include <X11/Xlib.h>
+#include <X11/Xutil.h>
 #endif
 
 namespace fs = std::filesystem;
@@ -275,21 +279,200 @@ TEST_CASE("STB-02 and STB-03 save the edit and ignore a missing id") {
     REQUIRE(project.tracks[0].clips.size() == 1);
 }
 
-TEST_CASE("HOST-07 the gain plugin view attaches and reports a size") {
+TEST_CASE("HOST-07 the gain view is a native child and resizes") {
     const fs::path gain = findUp("GHOVLZ Test Gain.vst3");
     REQUIRE(fs::exists(gain));
     PluginHost host;
     std::string error;
     auto device = host.instantiate(gain.string(), error);
     REQUIRE(device);
+#if defined(_WIN32)
+    WNDCLASSW cls {};
+    cls.lpfnWndProc = DefWindowProcW;
+    cls.hInstance = GetModuleHandleW(nullptr);
+    cls.lpszClassName = L"GhovlzHostParent";
+    RegisterClassW(&cls);
+    HWND parent = CreateWindowExW(0, L"GhovlzHostParent", L"host", WS_OVERLAPPEDWINDOW | WS_VISIBLE, 0, 0, 640, 420,
+                                  nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+    REQUIRE(parent != nullptr);
+    void* parentPtr = parent;
+#else
+    Display* display = XOpenDisplay(nullptr);
+    REQUIRE(display != nullptr);
+    XSetErrorHandler(+[](Display*, XErrorEvent*) { return 0; });
+    const int screen = DefaultScreen(display);
+    Window parent = XCreateSimpleWindow(display, RootWindow(display, screen), 0, 0, 640, 420, 0, 0, 0);
+    XMapWindow(display, parent);
+    XFlush(display);
+    XSync(display, False);
+    void* parentPtr = reinterpret_cast<void*>(static_cast<uintptr_t>(parent));
+#endif
     PluginHost::EditorAttach attached;
-    void* parent = reinterpret_cast<void*>(static_cast<uintptr_t>(1));
-    REQUIRE(host.openEditor(*device, parent, attached, error));
+    REQUIRE(host.openEditor(*device, parentPtr, attached, error));
     REQUIRE(attached.open);
     REQUIRE(attached.width == 480);
     REQUIRE(attached.height == 300);
-    REQUIRE(host.openEditor(*device, parent, attached, error) == false);
+    REQUIRE(host.resizeEditor(*device, 520, 280, error));
+#if defined(_WIN32)
+    HWND child = FindWindowExW(parent, nullptr, L"GhovlzGainView", nullptr);
+    REQUIRE(child != nullptr);
+    RECT rc {};
+    REQUIRE(GetClientRect(child, &rc));
+    REQUIRE(rc.right - rc.left == 520);
+    REQUIRE(rc.bottom - rc.top == 280);
     host.closeEditor(*device);
-    REQUIRE(host.openEditor(*device, parent, attached, error));
+    REQUIRE(FindWindowExW(parent, nullptr, L"GhovlzGainView", nullptr) == nullptr);
+    DestroyWindow(parent);
+#else
+    Window root = 0;
+    Window par = 0;
+    Window* kids = nullptr;
+    unsigned count = 0;
+    REQUIRE(XQueryTree(display, parent, &root, &par, &kids, &count) != 0);
+    REQUIRE(count >= 1);
+    int x = 0;
+    int y = 0;
+    unsigned width = 0;
+    unsigned height = 0;
+    unsigned border = 0;
+    unsigned depth = 0;
+    REQUIRE(XGetGeometry(display, kids[0], &root, &x, &y, &width, &height, &border, &depth) != 0);
+    REQUIRE(width == 520);
+    REQUIRE(height == 280);
+    XWindowAttributes attrs {};
+    for (int attempt = 0; attempt < 20 && attrs.map_state != IsViewable; ++attempt) {
+        XSync(display, False);
+        XGetWindowAttributes(display, kids[0], &attrs);
+    }
+    REQUIRE(attrs.map_state == IsViewable);
+    XImage* image = XGetImage(display, kids[0], 0, 0, width, height, AllPlanes, ZPixmap);
+    bool gold = false;
+    for (int attempt = 0; attempt < 4 && !gold; ++attempt) {
+        if (attempt > 0) {
+            XSync(display, False);
+            image = XGetImage(display, kids[0], 0, 0, width, height, AllPlanes, ZPixmap);
+        }
+        if (!image)
+            continue;
+        for (int py = 0; py < image->height && !gold; py += 4) {
+            for (int px = 0; px < image->width; px += 4) {
+                if ((XGetPixel(image, px, py) & 0xFFFFFFu) == 0xB49637u)
+                    gold = true;
+            }
+        }
+        XDestroyImage(image);
+        image = nullptr;
+    }
+    REQUIRE(gold);
+    XFree(kids);
     host.closeEditor(*device);
+    count = 0;
+    kids = nullptr;
+    REQUIRE(XQueryTree(display, parent, &root, &par, &kids, &count) != 0);
+    REQUIRE(count == 0);
+    if (kids)
+        XFree(kids);
+    XDestroyWindow(display, parent);
+    XCloseDisplay(display);
+#endif
+}
+
+TEST_CASE("UI-23 dice respects a lock and UI-24 saves, overrides and imports EQ themes") {
+    Theme gold = Theme::defaultTheme();
+    gold.locked[static_cast<int>(Role::Gold)] = 1;
+    const Theme a = Theme::roll(gold, 0xC0FFEEULL, true, true);
+    const Theme b = Theme::roll(gold, 0xC0FFEEULL, true, true);
+    REQUIRE(a.color(Role::Gold).r == gold.color(Role::Gold).r);
+    REQUIRE(a.color(Role::Gold).g == gold.color(Role::Gold).g);
+    REQUIRE(a.document() == b.document());
+    REQUIRE(a.meter.clip.r > 200);
+    REQUIRE(a.meter.clip.g < 80);
+    const Theme other = Theme::roll(gold, 0xC0FFEEULL ^ 0x9E3779B97F4A7C15ULL, true, true);
+    REQUIRE(other.document() != a.document());
+
+    ThemeProvider provider;
+    Theme step = gold;
+    for (int i = 0; i < 50; ++i) {
+        step.color(Role::Bg).r = static_cast<uint8_t>(i);
+        step.id = "step";
+        provider.set(step, ThemeCommit::Commit);
+    }
+    REQUIRE(provider.historyDepth() == 50);
+    step.color(Role::Bg).r = 200;
+    provider.set(step, ThemeCommit::Commit);
+    REQUIRE(provider.historyDepth() == 50);
+    int undos = 0;
+    while (provider.undo())
+        ++undos;
+    REQUIRE(undos == 50);
+    REQUIRE(provider.redo());
+
+    const auto dir = fs::temp_directory_path() / "ghovlz-theme-profile";
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+    Theme saved = a;
+    saved.id = "dice-test";
+    REQUIRE(saved.saveFile((dir / "dice-test.json").string()));
+    const Theme loaded = Theme::loadFile((dir / "dice-test.json").string());
+    REQUIRE(loaded.color(Role::Gold).r == saved.color(Role::Gold).r);
+    REQUIRE(loaded.seed == saved.seed);
+    fs::remove_all(dir);
+
+    Project project = Project::makeEmpty();
+    project.themeOverride = true;
+    project.themeDocument = saved.document();
+    const auto folder = fs::temp_directory_path() / "ghovlz-theme-project";
+    fs::remove_all(folder);
+    REQUIRE(project.saveToFolder(folder.string()));
+    Project opened = Project::makeEmpty();
+    REQUIRE(opened.loadFromFolder(folder.string()));
+    REQUIRE(opened.themeOverride);
+    const Theme fromProject = Theme::fromDocument(opened.themeDocument);
+    REQUIRE(fromProject.seed == saved.seed);
+    opened.themeOverride = false;
+    opened.themeDocument.clear();
+    REQUIRE(opened.saveToFolder(folder.string()));
+    Project plain = Project::makeEmpty();
+    REQUIRE(plain.loadFromFolder(folder.string()));
+    REQUIRE(plain.themeOverride == false);
+    fs::remove_all(folder);
+
+    const char* themes = R"(<Presets>
+  <Theme Name="Factory Gold" PluginBackground="112233" PluginBrandText="B49637" KnobArc="FF6E00" MeterClip="DC2828" GraphBand1="AA6A22" ExtraRole="010203"/>
+</Presets>)";
+    const auto imported = importEqThemes(themes);
+    REQUIRE(imported.size() == 1);
+    REQUIRE(imported[0].imported.size() == 6);
+    REQUIRE(imported[0].imported.at("ExtraRole") == 0xFF010203u);
+    REQUIRE(imported[0].color(Role::Bg).r == 0x11);
+    REQUIRE(imported[0].color(Role::Gold).r == 0xB4);
+    const std::string written = exportEqThemes(imported);
+    const auto again = importEqThemes(written);
+    REQUIRE(again.size() == 1);
+    REQUIRE(again[0].imported.size() == imported[0].imported.size());
+    for (const auto& kv : imported[0].imported)
+        REQUIRE((again[0].imported.at(kv.first) & 0xFFFFFFu) == (kv.second & 0xFFFFFFu));
+
+    const char* ramps = R"(<RampPresets>
+  <Preset name="Amber Glow">
+    <Ramp enabled="1" interpMode="1">
+      <Stop pos="0" argb="657920"/>
+      <Stop pos="0.45" argb="16744458"/>
+      <Stop pos="0.75" argb="15773736"/>
+      <Stop pos="1" argb="16773044"/>
+    </Ramp>
+  </Preset>
+</RampPresets>)";
+    const auto ramp = importEqRamps(ramps);
+    REQUIRE(ramp.size() == 1);
+    REQUIRE(ramp[0].name == "Amber Glow");
+    REQUIRE(ramp[0].stops.size() == 4);
+    REQUIRE(std::fabs(ramp[0].stops[1].pos - 0.45f) < 1.0e-4f);
+    const auto rampAgain = importEqRamps(exportEqRamps(ramp));
+    REQUIRE(rampAgain.size() == 1);
+    REQUIRE(rampAgain[0].stops.size() == 4);
+    for (int i = 0; i < 4; ++i) {
+        REQUIRE(rampAgain[0].stops[static_cast<size_t>(i)].pos == ramp[0].stops[static_cast<size_t>(i)].pos);
+        REQUIRE(rampAgain[0].stops[static_cast<size_t>(i)].argb == ramp[0].stops[static_cast<size_t>(i)].argb);
+    }
 }

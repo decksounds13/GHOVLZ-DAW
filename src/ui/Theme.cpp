@@ -1,12 +1,20 @@
 #include "ui/Theme.h"
 
 #include "core/RtGuard.h"
+#include "ui/ColourDice.h"
 
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <filesystem>
 #include <fstream>
+#include <functional>
+#include <sstream>
 
 namespace ghovlz {
 namespace {
@@ -243,10 +251,25 @@ Theme Theme::loadFile(const std::string& path) {
         t.id = root.value("id", t.id);
         t.name = root.value("name", t.name);
         t.seed = root.value("seed", 0ull);
+        t.brandBand = root.value("brandBand", true);
+        t.contrast = root.value("contrast", true);
         if (root.contains("roles")) {
             for (const auto& info : kRoles) {
                 if (root["roles"].contains(info.key))
                     t.color(info.role) = parseHex(root["roles"][info.key].get<std::string>());
+            }
+        }
+        if (root.contains("locked")) {
+            for (const auto& key : root["locked"]) {
+                for (const auto& info : kRoles)
+                    if (key.get<std::string>() == info.key)
+                        t.locked[static_cast<int>(info.role)] = 1;
+            }
+        }
+        if (root.contains("imported")) {
+            for (auto it = root["imported"].begin(); it != root["imported"].end(); ++it) {
+                const Color c = parseHex(it.value().get<std::string>());
+                t.imported[it.key()] = (uint32_t(c.a) << 24) | (uint32_t(c.r) << 16) | (uint32_t(c.g) << 8) | c.b;
             }
         }
         if (root.contains("meter"))
@@ -299,6 +322,377 @@ Theme Theme::fromSeed(std::string_view seedText) {
         t.meter.stops.back().color = t.meter.clip;
     t.meter.bake();
     return t;
+}
+
+namespace {
+
+uint32_t pack(Color c) {
+    return (uint32_t(c.a) << 24) | (uint32_t(c.r) << 16) | (uint32_t(c.g) << 8) | c.b;
+}
+
+std::string hex6(uint32_t argb) {
+    char b[8];
+    std::snprintf(b, sizeof(b), "%06X", static_cast<unsigned>(argb & 0xFFFFFFu));
+    return b;
+}
+
+nlohmann::json themeJson(const Theme& t) {
+    nlohmann::json roles = nlohmann::json::object();
+    nlohmann::json locked = nlohmann::json::array();
+    for (const auto& info : kRoles) {
+        roles[info.key] = "#" + hex6(pack(t.color(info.role)));
+        if (t.locked[static_cast<int>(info.role)])
+            locked.push_back(info.key);
+    }
+    nlohmann::json stops = nlohmann::json::array();
+    for (const auto& s : t.meter.stops)
+        stops.push_back({s.db, "#" + hex6(pack(s.color))});
+    nlohmann::json imported = nlohmann::json::object();
+    for (const auto& kv : t.imported)
+        imported[kv.first] = "#" + hex6(kv.second);
+    return {{"format", "ghovlz-theme"},
+            {"version", t.version},
+            {"id", t.id},
+            {"name", t.name},
+            {"seed", t.seed},
+            {"brandBand", t.brandBand},
+            {"contrast", t.contrast},
+            {"roles", roles},
+            {"locked", locked},
+            {"imported", imported},
+            {"meter", {{"id", t.meter.id},
+                       {"stops", stops},
+                       {"bg", "#" + hex6(pack(t.meter.background))},
+                       {"clip", "#" + hex6(pack(t.meter.clip))},
+                       {"hold", "#" + hex6(pack(t.meter.peakHold))},
+                       {"rms", "#" + hex6(pack(t.meter.rms))},
+                       {"floorDb", t.meter.floorDb},
+                       {"ceilDb", t.meter.ceilDb}}}};
+}
+
+const Role* roleForEqAttr(const std::string& attr) {
+    static const std::pair<const char*, Role> map[] = {
+        {"PluginBackground", Role::Bg},
+        {"MenuBackgroundGradientColor1", Role::Bg},
+        {"PluginBackground2", Role::Panel},
+        {"MenuBackgroundGradientColor2", Role::Panel2},
+        {"MenuThinBorderColor", Role::Line},
+        {"MenuTabBarBorderColor", Role::Line},
+        {"GraphBackground", Role::Well},
+        {"MenuButtonTextColor1", Role::Ink},
+        {"PluginButtonText", Role::Ink},
+        {"MenuLabelTextColor1", Role::Dim},
+        {"GraphAxisText", Role::Dim},
+        {"PluginBrandText", Role::Gold},
+        {"GraphSumCurve", Role::Rod},
+        {"PluginButtonAccent", Role::Amber},
+        {"KnobArc", Role::Arc},
+        {"KnobTint", Role::Knob},
+        {"GraphHandleText", Role::Pointer},
+        {"MeterClip", Role::Record},
+        {"MenuListBoxSelectionColor1", Role::Selection},
+        {"PluginButtonBackground", Role::Button},
+    };
+    for (const auto& row : map)
+        if (attr == row.first)
+            return &row.second;
+    return nullptr;
+}
+
+struct XmlNode {
+    std::string name;
+    std::map<std::string, std::string> attrs;
+    std::vector<XmlNode> kids;
+};
+
+std::vector<XmlNode> parseXml(const std::string& xml) {
+    std::vector<XmlNode> roots;
+    std::vector<XmlNode*> stack;
+    for (size_t i = 0; i < xml.size(); ++i) {
+        if (xml[i] != '<')
+            continue;
+        if (i + 1 < xml.size() && (xml[i + 1] == '?' || xml[i + 1] == '!'))
+            continue;
+        const bool closing = i + 1 < xml.size() && xml[i + 1] == '/';
+        size_t j = i + 1 + (closing ? 1 : 0);
+        while (j < xml.size() && xml[j] != '>' && !std::isspace(static_cast<unsigned char>(xml[j])))
+            ++j;
+        const std::string name = xml.substr(i + 1 + (closing ? 1 : 0), j - (i + 1 + (closing ? 1 : 0)));
+        XmlNode node;
+        node.name = name;
+        bool self = false;
+        while (j < xml.size() && xml[j] != '>') {
+            while (j < xml.size() && std::isspace(static_cast<unsigned char>(xml[j])))
+                ++j;
+            if (j >= xml.size() || xml[j] == '>')
+                break;
+            if (xml[j] == '/') {
+                self = true;
+                ++j;
+                continue;
+            }
+            const size_t k = j;
+            while (j < xml.size() && xml[j] != '=' && !std::isspace(static_cast<unsigned char>(xml[j])))
+                ++j;
+            const std::string key = xml.substr(k, j - k);
+            while (j < xml.size() && xml[j] != '"' && xml[j] != '\'')
+                ++j;
+            if (j >= xml.size())
+                break;
+            const char q = xml[j];
+            const size_t v = ++j;
+            while (j < xml.size() && xml[j] != q)
+                ++j;
+            node.attrs[key] = xml.substr(v, j - v);
+            if (j < xml.size())
+                ++j;
+        }
+        if (closing) {
+            if (!stack.empty())
+                stack.pop_back();
+        } else if (self || (j < xml.size() && xml[j] == '>' && j > 0 && xml[j - 1] == '/')) {
+            if (stack.empty())
+                roots.push_back(std::move(node));
+            else
+                stack.back()->kids.push_back(std::move(node));
+        } else {
+            if (stack.empty()) {
+                roots.push_back(std::move(node));
+                stack.push_back(&roots.back());
+            } else {
+                stack.back()->kids.push_back(std::move(node));
+                stack.push_back(&stack.back()->kids.back());
+            }
+        }
+        if (j < xml.size() && xml[j] == '>')
+            i = j;
+    }
+    return roots;
+}
+
+void walk(const XmlNode& node, const std::function<void(const XmlNode&, const XmlNode*)>& fn, const XmlNode* parent) {
+    fn(node, parent);
+    for (const auto& kid : node.kids)
+        walk(kid, fn, &node);
+}
+
+uint32_t parseAttrColour(const std::string& text) {
+    if (text.empty())
+        return 0;
+    bool hex = true;
+    for (char c : text) {
+        if (!std::isxdigit(static_cast<unsigned char>(c)))
+            hex = false;
+    }
+    if (hex && (text.size() == 6 || text.size() == 8)) {
+        const Color c = parseHex(text);
+        return pack(c);
+    }
+    const long value = std::strtol(text.c_str(), nullptr, 10);
+    return static_cast<uint32_t>(value);
+}
+
+} // namespace
+
+std::string Theme::document() const { return themeJson(*this).dump(2); }
+
+Theme Theme::fromDocument(const std::string& text) {
+    std::istringstream in(text);
+    nlohmann::json root;
+    try {
+        in >> root;
+    } catch (...) {
+        return defaultTheme();
+    }
+    // Reuse the file parser by writing through the same object shape.
+    Theme t = defaultTheme();
+    t.id = root.value("id", t.id);
+    t.name = root.value("name", t.name);
+    t.seed = root.value("seed", 0ull);
+    t.brandBand = root.value("brandBand", true);
+    t.contrast = root.value("contrast", true);
+    if (root.contains("roles")) {
+        for (const auto& info : kRoles)
+            if (root["roles"].contains(info.key))
+                t.color(info.role) = parseHex(root["roles"][info.key].get<std::string>());
+    }
+    if (root.contains("locked")) {
+        for (const auto& key : root["locked"])
+            for (const auto& info : kRoles)
+                if (key.get<std::string>() == info.key)
+                    t.locked[static_cast<int>(info.role)] = 1;
+    }
+    if (root.contains("imported")) {
+        for (auto it = root["imported"].begin(); it != root["imported"].end(); ++it) {
+            const Color c = parseHex(it.value().get<std::string>());
+            t.imported[it.key()] = pack(c);
+        }
+    }
+    if (root.contains("meter"))
+        t.meter = meterFromJson(root["meter"]);
+    t.bake();
+    return t;
+}
+
+bool Theme::saveFile(const std::string& path) const {
+    std::ofstream out(path);
+    if (!out)
+        return false;
+    out << document();
+    return static_cast<bool>(out);
+}
+
+std::string Theme::profileDir() {
+#if defined(_WIN32)
+    const char* profile = std::getenv("USERPROFILE");
+    const std::string root = profile ? profile : ".";
+    return root + "/AppData/Roaming/GHOVLZ/themes";
+#else
+    const char* home = std::getenv("HOME");
+    const std::string root = home ? home : ".";
+    return root + "/.config/ghovlz/themes";
+#endif
+}
+
+bool Theme::saveToProfile() const {
+    std::error_code ec;
+    std::filesystem::create_directories(profileDir(), ec);
+    if (ec)
+        return false;
+    const std::string safe = id.empty() ? "theme" : id;
+    return saveFile(profileDir() + "/" + safe + ".json");
+}
+
+Theme Theme::roll(const Theme& base, uint64_t seed, bool brandBandOn, bool contrastOn) {
+    Theme t = base;
+    t.seed = seed;
+    t.brandBand = brandBandOn;
+    t.contrast = contrastOn;
+    Pcg32 rng(seed == 0 ? 1 : seed);
+    const float h0 = brandBandOn ? 0.08f : 0.f;
+    const float h1 = brandBandOn ? 0.14f : 1.f;
+    auto paint = [&](float v0, float v1) {
+        return Color::argb(hsvToArgb(h0 + rng.unit() * (h1 - h0), 0.35f + rng.unit() * 0.5f, v0 + rng.unit() * (v1 - v0)));
+    };
+    for (const auto& info : kRoles) {
+        if (t.locked[static_cast<int>(info.role)])
+            continue;
+        if (contrastOn && (info.role == Role::Record || info.role == Role::Armed)) {
+            t.color(info.role) = hex(info.role == Role::Record ? 0xDC2828 : 0xFF821E);
+            continue;
+        }
+        if (info.group == RoleGroup::Surface)
+            t.color(info.role) = paint(0.04f, 0.16f);
+        else if (info.group == RoleGroup::Text)
+            t.color(info.role) = paint(contrastOn ? 0.82f : 0.35f, 0.98f);
+        else
+            t.color(info.role) = paint(0.45f, 0.9f);
+    }
+    for (auto& stop : t.meter.stops) {
+        if (contrastOn && stop.db >= t.meter.ceilDb - 0.05f)
+            stop.color = hex(0xDC2828);
+        else
+            stop.color = paint(0.25f, 0.85f);
+    }
+    if (contrastOn)
+        t.meter.clip = hex(0xDC2828);
+    t.id = "dice";
+    t.name = "Dice";
+    t.bake();
+    return t;
+}
+
+std::vector<Theme> importEqThemes(const std::string& xml) {
+    std::vector<Theme> out;
+    const auto roots = parseXml(xml);
+    auto take = [&](const XmlNode& node) {
+        if (node.name != "Theme")
+            return;
+        Theme t = Theme::defaultTheme();
+        const auto name = node.attrs.count("Name") ? node.attrs.at("Name") : node.attrs.count("name") ? node.attrs.at("name") : "EQ";
+        t.name = name;
+        t.id = name;
+        for (const auto& kv : node.attrs) {
+            if (kv.first == "Name" || kv.first == "name" || kv.first == "Created" || kv.first == "Modified" ||
+                kv.first == "ColorAttributeNames")
+                continue;
+            const uint32_t colour = parseAttrColour(kv.second);
+            t.imported[kv.first] = colour;
+            if (const Role* role = roleForEqAttr(kv.first))
+                t.color(*role) = Color::argb(colour | 0xFF000000u);
+            if (kv.first == "MeterClip")
+                t.meter.clip = Color::argb(colour | 0xFF000000u);
+            if (kv.first == "MeterBackground")
+                t.meter.background = Color::argb(colour | 0xFF000000u);
+            if (kv.first == "MeterFill" && !t.meter.stops.empty())
+                t.meter.stops.front().color = Color::argb(colour | 0xFF000000u);
+        }
+        for (int i = 1; i <= 8; ++i) {
+            const std::string key = "GraphBand" + std::to_string(i);
+            const auto it = t.imported.find(key);
+            if (it == t.imported.end())
+                continue;
+            t.color(static_cast<Role>(static_cast<int>(Role::Track0) + (i - 1))) = Color::argb(it->second | 0xFF000000u);
+        }
+        t.bake();
+        out.push_back(std::move(t));
+    };
+    for (const auto& root : roots)
+        walk(root, [&](const XmlNode& node, const XmlNode*) { take(node); }, nullptr);
+    return out;
+}
+
+std::string exportEqThemes(const std::vector<Theme>& themes) {
+    std::ostringstream xml;
+    xml << "<Presets>\n";
+    for (const auto& theme : themes) {
+        xml << "  <Theme Name=\"" << theme.name << "\"";
+        for (const auto& kv : theme.imported)
+            xml << " " << kv.first << "=\"" << hex6(kv.second) << "\"";
+        xml << "/>\n";
+    }
+    xml << "</Presets>\n";
+    return xml.str();
+}
+
+std::vector<EqRamp> importEqRamps(const std::string& xml) {
+    std::vector<EqRamp> out;
+    const auto roots = parseXml(xml);
+    auto takePreset = [&](const XmlNode& node) {
+        if (node.name != "Preset")
+            return;
+        EqRamp ramp;
+        ramp.name = node.attrs.count("name") ? node.attrs.at("name") : "Ramp";
+        auto collect = [&](const XmlNode& n, auto&& self) -> void {
+            if (n.name == "Stop") {
+                EqRampStop stop;
+                stop.pos = n.attrs.count("pos") ? std::strtof(n.attrs.at("pos").c_str(), nullptr) : 0.f;
+                stop.argb = n.attrs.count("argb") ? parseAttrColour(n.attrs.at("argb")) : 0xFF000000u;
+                ramp.stops.push_back(stop);
+            }
+            for (const auto& kid : n.kids)
+                self(kid, self);
+        };
+        collect(node, collect);
+        if (ramp.stops.size() >= 2)
+            out.push_back(std::move(ramp));
+    };
+    for (const auto& root : roots)
+        walk(root, [&](const XmlNode& node, const XmlNode*) { takePreset(node); }, nullptr);
+    return out;
+}
+
+std::string exportEqRamps(const std::vector<EqRamp>& ramps) {
+    std::ostringstream xml;
+    xml << "<RampPresets>\n";
+    for (const auto& ramp : ramps) {
+        xml << "  <Preset name=\"" << ramp.name << "\">\n    <Ramp>\n";
+        for (const auto& stop : ramp.stops)
+            xml << "      <Stop pos=\"" << stop.pos << "\" argb=\"" << static_cast<int32_t>(stop.argb) << "\"/>\n";
+        xml << "    </Ramp>\n  </Preset>\n";
+    }
+    xml << "</RampPresets>\n";
+    return xml.str();
 }
 
 ThemeProvider::ThemeProvider() : current_(Theme::defaultTheme()) {}

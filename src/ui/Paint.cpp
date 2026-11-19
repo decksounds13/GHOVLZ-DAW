@@ -689,42 +689,33 @@ void mixer(Canvas& c, const Frame& f) {
         c.innerShadow(r, 14.f, Color{0, 0, 0, 130});
         c.strokeRect(r, selected ? gold() : line(), selected ? 2.f : 1.f);
         c.fillRect({r.x, r.y, r.w, 5.f}, Color::argb(t->color));
-        c.drawText(t->name, r.x + 8.f, r.y + 12.f, 18.f, ink(), true);
-        c.drawText("In  All Ins", r.x + 8.f, r.y + 34.f, 16.f, dim(), false);
+        c.drawText(t->name, r.x + 8.f, r.y + 10.f, 18.f, ink(), true);
+        c.drawText("In  All Ins", r.x + 8.f, r.y + 32.f, 18.f, dim(), false);
         const std::string out = t->output.empty() || t->id == "master" ? "Master" : t->output;
-        c.drawText(std::string("Out  ") + out, r.x + 8.f, r.y + 54.f, 16.f, dim(), false);
+        c.drawText(std::string("Out  ") + out, r.x + 8.f, r.y + 52.f, 18.f, dim(), false);
 
-        const int slots = 4;
-        for (int s = 0; s < slots; ++s) {
-            Rect slot{r.x + 8.f, r.y + 80.f + s * 26.f, r.w - 16.f, 22.f};
-            c.fillRoundRect(slot, 4.f, Color::argb(0xFF1A1612));
-            c.innerShadow(slot, 3.f, Color{0, 0, 0, 110});
-            std::string owned = "—";
-            if (s < static_cast<int>(t->devices.size()))
-                owned = t->devices[static_cast<size_t>(s)].name;
-            c.drawText(owned, slot.x + 6.f, slot.y + 2.f, 14.f, owned == "—" ? dim() : ink(), false);
-        }
+        const int shown = std::min(4, static_cast<int>(t->devices.size()));
+        for (int s = 0; s < shown; ++s)
+            c.drawText(t->devices[static_cast<size_t>(s)].name, r.x + 8.f, r.y + 76.f + s * 22.f, 18.f, ink(), false);
 
-        float a = -100.f, b = -100.f;
-        for (const auto& s : t->sends) {
-            if (s.target == "retA")
-                a = s.levelDb;
-            if (s.target == "retB")
-                b = s.levelDb;
+        float sendDb = -100.f;
+        const char* sendName = "A";
+        if (!t->sends.empty()) {
+            sendDb = t->sends.front().levelDb;
+            sendName = t->sends.front().target == "retB" ? "B" : "A";
         }
-        const float sendY = r.y + 214.f;
-        darkKnob(c, r.x + r.w * 0.32f, sendY, 44.f, dbNorm(a), "A", a <= -80.f ? "-inf" : paramText(a));
-        darkKnob(c, r.x + r.w * 0.72f, sendY, 44.f, dbNorm(b), "B", b <= -80.f ? "-inf" : paramText(b));
+        const float sendY = r.y + 210.f;
+        darkKnob(c, r.x + r.w * 0.5f, sendY, 72.f, dbNorm(sendDb), sendName, sendDb <= -80.f ? "-inf" : paramText(sendDb));
 
         char pan[16];
         std::snprintf(pan, sizeof(pan), "%+.1f", t->pan);
-        const float panY = r.y + 308.f;
-        darkKnob(c, r.x + r.w * 0.5f, panY, 52.f, (t->pan + 1.f) * 0.5f, "Pan", pan);
+        const float panY = r.y + 340.f;
+        darkKnob(c, r.x + r.w * 0.5f, panY, 72.f, (t->pan + 1.f) * 0.5f, "Pan", pan);
         char db[16];
         std::snprintf(db, sizeof(db), "%+.1f dB", t->volumeDb);
-        centered(c, db, r.x + r.w * 0.5f, panY + 78.f, 16.f, rod(), true);
+        centered(c, db, r.x + r.w * 0.5f, panY + 78.f, 18.f, rod(), true);
 
-        const float faderTop = panY + 128.f;
+        const float faderTop = panY + 112.f;
         const float faderBot = r.y + r.h - 72.f;
         const float faderX = r.x + 44.f;
         const float faderH = std::max(40.f, faderBot - faderTop);
@@ -816,51 +807,153 @@ void drawLfo(Canvas& c, Rect r) {
     }
 }
 
+std::string shortParam(const std::string& id) {
+    if (id == "position") return "Pos";
+    if (id == "cutoff") return "Cut";
+    if (id == "resonance" || id == "reso") return "Res";
+    if (id == "unison") return "Uni";
+    if (id == "wave") return "Wave";
+    return id.size() > 5 ? id.substr(0, 5) : id;
+}
+
+void drawChainDisplay(Canvas& c, Rect r, const std::string& type) {
+    c.fillRoundRect(r, 4.f, Color::argb(0xFF100E0C));
+    c.innerShadow(r, 5.f, Color{0, 0, 0, 140});
+    const float mid = r.y + r.h * 0.55f;
+    if (type == "eq") {
+        float px = r.x + 8.f;
+        float py = mid + 10.f;
+        const float nodeT[] = {0.16f, 0.48f, 0.78f};
+        const float nodeY[] = {8.f, -r.h * 0.28f, 4.f};
+        for (int i = 1; i <= 40; ++i) {
+            const float t = static_cast<float>(i) / 40.f;
+            const float x = r.x + 8.f + t * (r.w - 16.f);
+            const float bell = std::exp(-std::pow((t - 0.48f) * 5.5f, 2.f));
+            const float shelf = t < 0.22f ? 8.f : (t > 0.72f ? 4.f : 0.f);
+            const float y = mid + shelf - bell * r.h * 0.32f;
+            c.line(px, py, x, y, amber(), 2.f);
+            px = x;
+            py = y;
+        }
+        for (int n = 0; n < 3; ++n) {
+            const float x = r.x + 8.f + nodeT[n] * (r.w - 16.f);
+            const float y = mid + nodeY[n];
+            c.fillEllipse(x, y, 7.f, 7.f, rod());
+            c.fillEllipse(x, y, 4.5f, 4.5f, gold());
+        }
+        return;
+    }
+    if (type == "filter") {
+        float px = r.x + 8.f;
+        float py = r.y + 12.f;
+        for (int i = 1; i <= 32; ++i) {
+            const float t = static_cast<float>(i) / 32.f;
+            const float x = r.x + 8.f + t * (r.w - 16.f);
+            const float fall = t < 0.62f ? 0.f : (t - 0.62f) * (t - 0.62f) * 220.f;
+            const float y = std::min(r.y + r.h - 8.f, r.y + 14.f + fall);
+            c.line(px, py, x, y, amber(), 2.f);
+            px = x;
+            py = y;
+        }
+        return;
+    }
+    if (type == "saturator" || type == "compressor" || type == "dyn") {
+        float px = r.x + 8.f;
+        float py = r.y + r.h - 10.f;
+        for (int i = 1; i <= 24; ++i) {
+            const float t = static_cast<float>(i) / 24.f;
+            const float x = r.x + 8.f + t * (r.w - 16.f);
+            const float shaped = std::tanh(t * 2.2f) / std::tanh(2.2f);
+            const float y = r.y + r.h - 10.f - shaped * (r.h - 20.f);
+            c.line(px, py, x, y, amber(), 2.f);
+            px = x;
+            py = y;
+        }
+        return;
+    }
+    float px = r.x + 6.f;
+    float py = mid;
+    for (int i = 1; i <= 36; ++i) {
+        const float t = static_cast<float>(i) / 36.f;
+        const float x = r.x + 6.f + t * (r.w - 12.f);
+        const float y = mid - std::sin(t * kPi * 3.f) * (r.h * 0.32f);
+        c.line(px, py, x, y, amber(), 2.f);
+        px = x;
+        py = y;
+    }
+}
+
+void goldJoin(Canvas& c, float x0, float x1, float y) {
+    if (x1 <= x0 + 4.f)
+        return;
+    c.line(x0, y, x1, y, gold(), 3.f);
+    c.fillEllipse(x0, y, 4.f, 4.f, gold());
+    c.fillEllipse(x1, y, 4.f, 4.f, gold());
+    c.fillEllipse((x0 + x1) * 0.5f, y, 5.f, 5.f, gold());
+}
+
 void deviceChain(Canvas& c, const Frame& f) {
     const float w = static_cast<float>(c.width());
-    const float h = static_cast<float>(c.height());
     const Track* chain = f.project ? f.project->findTrack("lead") : nullptr;
-    c.drawText("SYNTH LEAD", 24.f, kBarH + 12.f, 22.f, ink(), true);
+    Rect box{16.f, kBarH + 24.f, w - 32.f, 392.f};
+    panelBox(c, box, 10.f);
+    c.drawText(chain ? chain->name.c_str() : "Lead", box.x + 16.f, box.y + 12.f, 18.f, ink(), true);
     if (!chain)
         return;
-    const float side = 300.f;
-    const float top = kBarH + 52.f;
-    const float pw = (w - side - 48.f) / std::max<size_t>(1, chain->devices.size()) - 12.f;
-    for (size_t i = 0; i < chain->devices.size(); ++i) {
-        const auto& d = chain->devices[i];
-        Rect r{20.f + static_cast<float>(i) * (pw + 12.f), top, pw, h - top - 24.f};
-        panelBox(c, r, 10.f);
-        c.fillRect({r.x, r.y, 5.f, r.h}, gold());
-        c.drawText(d.name, r.x + 18.f, r.y + 14.f, 22.f, ink(), true);
-        drawDeviceGraph(c, {r.x + 16.f, r.y + 52.f, r.w - 52.f, std::max(80.f, r.h - 340.f)}, static_cast<int>(i % 3));
-        drawStereo(c, f, chain->id, {r.x + r.w - 28.f, r.y + 52.f, 16.f, std::max(80.f, r.h - 340.f)}, 0.45f);
-        int shown = 0;
-        for (const auto& pr : d.params) {
-            if (shown >= 4)
-                break;
-            const float cxk = r.x + 56.f + static_cast<float>(shown % 2) * 120.f;
-            const float cyk = r.y + r.h - 210.f + static_cast<float>(shown / 2) * 110.f;
-            darkKnob(c, cxk, cyk, 48.f, knobNorm(pr.second), pr.first, paramText(pr.second));
-            ++shown;
+    const float sideW = 176.f;
+    c.fillRect({box.x + box.w - sideW - 10.f, box.y + 12.f, 1.f, box.h - 24.f}, line());
+    const float cardW = 200.f;
+    const float gap = 32.f;
+    const float top = box.y + 42.f;
+    const float cardH = box.h - 56.f;
+    const int n = static_cast<int>(chain->devices.size());
+    const float joinY = top + 64.f;
+    for (int i = 0; i < n; ++i) {
+        const auto& d = chain->devices[static_cast<size_t>(i)];
+        Rect r{box.x + 14.f + static_cast<float>(i) * (cardW + gap), top, cardW, cardH};
+        if (r.x + r.w > box.x + box.w - sideW - 18.f)
+            break;
+        panelBox(c, r, 8.f);
+        centered(c, d.name, r.x + r.w * 0.5f, r.y + 8.f, 18.f, ink(), true);
+        const bool graph = d.type == "eq";
+        const bool knobsOnly = d.type == "saturator" || d.type == "compressor" || d.type == "dyn";
+        if (!knobsOnly)
+            drawChainDisplay(c, {r.x + 12.f, r.y + 34.f, r.w - 24.f, graph ? cardH - 50.f : 64.f}, d.type);
+        if (!graph) {
+            std::vector<std::pair<std::string, float>> knobs;
+            const int limit = knobsOnly ? 4 : 2;
+            for (const auto& pr : d.params) {
+                if (static_cast<int>(knobs.size()) >= limit)
+                    break;
+                knobs.push_back(pr);
+            }
+            const int count = static_cast<int>(knobs.size());
+            const float diameter = knobsOnly ? 64.f : 70.f;
+            const int cols = count <= 1 ? 1 : 2;
+            for (int k = 0; k < count; ++k) {
+                const int col = k % cols;
+                const int row = k / cols;
+                const float cxk = r.x + (cols == 1 ? r.w * 0.5f : (col == 0 ? 56.f : r.w - 56.f));
+                const float cyk = knobsOnly ? r.y + 78.f + static_cast<float>(row) * 120.f
+                                            : r.y + 168.f + static_cast<float>(row) * 110.f;
+                darkKnob(c, cxk, cyk, diameter, knobNorm(knobs[static_cast<size_t>(k)].second),
+                         shortParam(knobs[static_cast<size_t>(k)].first), paramText(knobs[static_cast<size_t>(k)].second));
+            }
         }
-        if (i + 1 < chain->devices.size())
-            c.line(r.x + r.w, r.y + 40.f, r.x + r.w + 12.f, r.y + 40.f, gold(), 2.f);
+        if (i + 1 < n) {
+            const float nextX = r.x + cardW + gap;
+            if (nextX + cardW <= box.x + box.w - sideW - 18.f)
+                goldJoin(c, r.x + r.w, nextX, joinY);
+        }
     }
-    Rect mod{w - side - 8.f, top, side, h - top - 24.f};
-    panelBox(c, mod, 10.f);
-    c.fillRect({mod.x, mod.y, mod.w, 36.f}, Color::argb(0xFF1C1814));
-    c.drawText("MODULATION", mod.x + 16.f, mod.y + 8.f, 18.f, rod(), true);
-    c.drawText("LFO  to  Filter Cutoff", mod.x + 16.f, mod.y + 48.f, 18.f, ink(), true);
-    drawLfo(c, {mod.x + 16.f, mod.y + 76.f, mod.w - 32.f, 64.f});
-    darkKnob(c, mod.x + 56.f, mod.y + 200.f, 48.f, 0.42f, "Rate", "1/8");
-    darkKnob(c, mod.x + 160.f, mod.y + 200.f, 48.f, 0.65f, "Depth", "65%");
-    c.drawText("ENVELOPE", mod.x + 16.f, mod.y + 280.f, 18.f, ink(), true);
-    drawEnvelope(c, {mod.x + 16.f, mod.y + 308.f, mod.w - 32.f, 72.f});
-    const char* env[] = {"A", "D", "S", "R"};
-    const float envV[] = {0.18f, 0.36f, 0.62f, 0.4f};
-    const char* envT[] = {"12", "180", "70", "240"};
-    for (int i = 0; i < 4; ++i)
-        darkKnob(c, mod.x + 40.f + i * 68.f, mod.y + 450.f, 44.f, envV[i], env[i], envT[i]);
+    Rect mod{box.x + box.w - sideW, box.y + 8.f, sideW - 8.f, box.h - 16.f};
+    c.drawText("LFO", mod.x + 12.f, mod.y + 8.f, 18.f, ink(), true);
+    c.drawText("Envelope", mod.x + 12.f, mod.y + 36.f, 18.f, dim(), false);
+    drawEnvelope(c, {mod.x + 12.f, mod.y + 60.f, mod.w - 24.f, 56.f});
+    c.drawText("LFO", mod.x + 12.f, mod.y + 128.f, 18.f, dim(), false);
+    drawLfo(c, {mod.x + 12.f, mod.y + 152.f, mod.w - 24.f, 56.f});
+    c.drawText("Envelope", mod.x + 12.f, mod.y + 220.f, 18.f, dim(), false);
+    drawEnvelope(c, {mod.x + 12.f, mod.y + 244.f, mod.w - 24.f, 64.f});
 }
 
 void piano(Canvas& c, const Frame& f) {
@@ -1080,8 +1173,8 @@ void pluginWindow(Canvas& c, const Frame& f) {
 } // namespace
 
 void preferences(Canvas& c, const Frame& f) {
-    c.drawText("Settings", 28.f, kBarH + 20.f, 22.f, ink(), true);
-    c.drawText(std::string("Theme  ") + active().name, 28.f, kBarH + 58.f, 16.f, gold(), true);
+    const float w = static_cast<float>(c.width());
+    c.drawText("Settings", 28.f, kBarH + 12.f, 22.f, ink(), true);
     const std::string rows[] = {
         std::string("Backend  ") + f.prefBackend,
         std::string("Device  ") + f.prefDevice,
@@ -1091,9 +1184,67 @@ void preferences(Canvas& c, const Frame& f) {
         std::string("Renderer  ") + f.prefRenderer,
     };
     for (int i = 0; i < 6; ++i)
-        c.drawText(rows[i], 28.f, kBarH + 100.f + static_cast<float>(i) * 28.f, 16.f, dim(), false);
+        c.drawText(rows[i], 28.f, kBarH + 48.f + static_cast<float>(i) * 26.f, 18.f, dim(), false);
+
+    const Theme& theme = active();
+    Rect editor{360.f, kBarH + 48.f, w - 388.f, 860.f};
+    panelBox(c, editor, 8.f);
+    c.drawText("THEME", editor.x + 16.f, editor.y + 12.f, 18.f, rod(), true);
+    c.drawText(theme.name, editor.x + 110.f, editor.y + 12.f, 18.f, ink(), true);
+    const Role shown[] = {Role::Bg, Role::Panel, Role::Ink, Role::Gold, Role::Amber, Role::Arc, Role::Knob, Role::Pointer, Role::Record};
+    const char* names[] = {"Background", "Panel", "Text", "Gold", "Amber", "Arc", "Knob", "Pointer", "Clip"};
+    for (int i = 0; i < 9; ++i) {
+        const float y = editor.y + 48.f + static_cast<float>(i) * 36.f;
+        Rect sw{editor.x + 16.f, y, 28.f, 24.f};
+        c.fillRoundRect(sw, 4.f, theme.color(shown[i]));
+        c.strokeRect(sw, line(), 1.f);
+        c.drawText(names[i], editor.x + 54.f, y + 2.f, 18.f, ink(), false);
+        const bool lock = shown[i] == Role::Gold || shown[i] == Role::Record || theme.locked[static_cast<int>(shown[i])];
+        pill(c, {editor.x + 220.f, y, 64.f, 24.f}, lock ? "Lock" : "Free", lock);
+    }
+    Rect ramp{editor.x + 320.f, editor.y + 56.f, editor.w - 348.f, 120.f};
+    c.fillRoundRect(ramp, 6.f, Color::argb(0xFF100E0C));
+    c.drawText("Meter ramp", ramp.x + 8.f, ramp.y + 6.f, 18.f, dim(), false);
+    if (!theme.meter.stops.empty() && ramp.w > 20.f) {
+        const float floorDb = theme.meter.floorDb;
+        const float span = std::max(1.f, theme.meter.ceilDb - floorDb);
+        for (int x = 0; x < static_cast<int>(ramp.w - 16.f); ++x) {
+            const float db = floorDb + span * (static_cast<float>(x) / std::max(1.f, ramp.w - 16.f));
+            c.fillRect({ramp.x + 8.f + static_cast<float>(x), ramp.y + 36.f, 1.f, 28.f}, theme.meter.colorAt(db));
+        }
+        for (const auto& stop : theme.meter.stops) {
+            const float t = std::clamp((stop.db - floorDb) / span, 0.f, 1.f);
+            const float x = ramp.x + 8.f + t * (ramp.w - 16.f);
+            c.fillEllipse(x, ramp.y + 50.f, 5.f, 5.f, ink());
+            char mark[16];
+            std::snprintf(mark, sizeof(mark), "%.0f", stop.db);
+            c.drawText(mark, x - 12.f, ramp.y + 78.f, 18.f, dim(), false);
+        }
+    }
+    drawStereo(c, f, "master", {ramp.x + ramp.w - 36.f, editor.y + 200.f, 22.f, 160.f}, 0.7f);
+    c.drawText("Live", ramp.x + ramp.w - 48.f, editor.y + 176.f, 18.f, dim(), false);
+
+    Rect dice{editor.x + 320.f, editor.y + 210.f, 280.f, 220.f};
+    c.drawText("Seed", dice.x, dice.y, 18.f, dim(), false);
+    c.fillRoundRect({dice.x, dice.y + 26.f, 180.f, 32.f}, 4.f, Color::argb(0xFF1A1612));
+    char seed[24];
+    std::snprintf(seed, sizeof(seed), "%llu", static_cast<unsigned long long>(theme.seed ? theme.seed : 0xC0FFEEULL));
+    c.drawText(seed, dice.x + 10.f, dice.y + 30.f, 18.f, ink(), true);
+    pill(c, {dice.x + 190.f, dice.y + 26.f, 80.f, 32.f}, "Dice", true);
+    pill(c, {dice.x, dice.y + 72.f, 140.f, 28.f}, "Brand band", theme.brandBand);
+    pill(c, {dice.x + 150.f, dice.y + 72.f, 120.f, 28.f}, "Contrast", theme.contrast);
+    c.drawText("Undo 50", dice.x, dice.y + 114.f, 18.f, rod(), true);
+    c.drawText("Redo", dice.x + 110.f, dice.y + 114.f, 18.f, dim(), false);
+    int built = 0;
+    for (const auto& id : Theme::builtinIds()) {
+        if (built >= 6)
+            break;
+        c.drawText(id.c_str(), dice.x, dice.y + 146.f + static_cast<float>(built) * 22.f, 18.f,
+                   id == theme.id ? gold() : dim(), id == theme.id);
+        ++built;
+    }
     if (!f.prefMessage.empty())
-        c.drawText(f.prefMessage, 28.f, kBarH + 280.f, 16.f, amber(), false);
+        c.drawText(f.prefMessage, 28.f, kBarH + 220.f, 18.f, amber(), false);
 }
 
 void paintFrame(Canvas& c, const Frame& frame) {

@@ -159,10 +159,10 @@ int main(int argc, char** argv) {
         auto canvas = ghovlz::makeSoftwareCanvas(1680, 980);
         const ghovlz::View views[] = {ghovlz::View::Arrangement, ghovlz::View::Session, ghovlz::View::Perform,
                                       ghovlz::View::Mixer, ghovlz::View::Device, ghovlz::View::Piano,
-                                      ghovlz::View::Browser, ghovlz::View::Plugin};
+                                      ghovlz::View::Browser, ghovlz::View::Plugin, ghovlz::View::Prefs};
         const char* names[] = {"arrangement.png", "session.png", "perform.png", "mixer.png",
-                               "device-chain.png", "piano-roll.png", "browser.png", "plugin.png"};
-        for (int i = 0; i < 8; ++i) {
+                               "device-chain.png", "piano-roll.png", "browser.png", "plugin.png", "theme.png"};
+        for (int i = 0; i < 9; ++i) {
             frame.view = views[i];
             frame.playhead = engine.playhead();
             ghovlz::paintFrame(*canvas, frame);

@@ -30,6 +30,7 @@ public:
     // HOST-07. Asks the plugin for an IPlugView, checks the platform, and calls attached().
     // The view stores the parent. It does not create a native child window.
     bool openEditor(Device& device, void* parent, EditorAttach& out, std::string& error);
+    bool resizeEditor(Device& device, int width, int height, std::string& error);
     void closeEditor(Device& device);
 
 private:

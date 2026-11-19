@@ -4,6 +4,7 @@
 
 #include <array>
 #include <cstdint>
+#include <map>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -126,14 +127,43 @@ struct Theme {
 
     Color color(Role role) const { return colors[static_cast<int>(role)]; }
     Color& color(Role role) { return colors[static_cast<int>(role)]; }
+    // 1 means the dice leaves this role alone.
+    std::array<uint8_t, static_cast<int>(Role::Count)> locked {};
+    bool brandBand = true;
+    bool contrast = true;
+    // Every colour attribute read from an EQ theme file, keyed by its XML name.
+    std::map<std::string, uint32_t> imported;
 
     static const Theme& defaultTheme();
     static const Theme* findBuiltin(std::string_view id);
     static std::vector<std::string> builtinIds();
     static Theme loadFile(const std::string& path);
+    static Theme fromDocument(const std::string& json);
     static Theme fromSeed(std::string_view seedText);
+    // UI-23. Same seed, locks and toggles reprint the same theme. Contrast keeps clip red.
+    static Theme roll(const Theme& base, uint64_t seed, bool brandBand, bool contrast);
+    std::string document() const;
+    bool saveFile(const std::string& path) const;
+    bool saveToProfile() const;
+    static std::string profileDir();
     void bake() { meter.bake(); }
 };
+
+struct EqRampStop {
+    float pos = 0.f;
+    uint32_t argb = 0xFF000000;
+};
+
+struct EqRamp {
+    std::string name;
+    std::vector<EqRampStop> stops;
+};
+
+// UI-24. EQ Themes/presets.xml and ramp_presets.xml. Every attribute and stop is kept.
+std::vector<Theme> importEqThemes(const std::string& xml);
+std::string exportEqThemes(const std::vector<Theme>& themes);
+std::vector<EqRamp> importEqRamps(const std::string& xml);
+std::string exportEqRamps(const std::vector<EqRamp>& ramps);
 
 enum class ThemeCommit { Preview, Commit };
 

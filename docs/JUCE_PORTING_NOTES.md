@@ -110,7 +110,7 @@ A VST3 plugin in this tree is a `MODULE` from `smtg_add_vst3plugin`, linked to `
 
 Still required for a real product plugin, and not built here:
 
-- `IPlugView` embed (HOST-07). The test gain plugin returns a 480×300 view. The host calls `createView`, checks HWND or X11, then `attached` / `removed`. The view stores the parent. It does not create a native child window yet, so a ported EQ editor still needs to paint into that parent (Canvas, or a child HWND with Direct2D).
+- `IPlugView` embed (HOST-07). The test gain plugin creates a native child of the parent it is given: an `HWND` (`WS_CHILD`) on Windows, an X11 window on Linux. `attached` paints the view into that child. `onSize` resizes it and paints again. `removed` destroys the child. Content scale for DPI, and the Linux `IRunLoop`, are still open. A ported EQ editor would paint its own controls into the same child.
 - CMake install/signing, and a decision about the VST3 SDK license on anything shipped outside the company.
 - CLAP, if that format is required: an entry point, parameters, and state. `ClapHost` on the host side is still a stub.
 - A factory UID, bus layout, and `setBusArrangements` that match what the host activates. The gain plugin uses `SingleComponentEffect` and stereo buses.
@@ -133,7 +133,11 @@ Still required for a real product plugin, and not built here:
 
 Do not put the VST3 SDK inside `ghovlz-core` public headers if a plugin and the host would both export SDK symbols. The host links the SDK. A plugin links the SDK on its own target, which is what `GhovlzTestGain` does.
 
-## 6. Other GHOVLZ apps
+## 6. Device-chain EQ card
+
+The EQ card on the device-chain view is a drawing: a compact curve and three band nodes, so the chain matches the warm concept. It does not process audio. The EQ DSP and editor port stays a separate piece of work (the gap plan's EQ port, not this view).
+
+## 7. Other GHOVLZ apps
 
 Scope is the amount of code that has to move, not a calendar estimate.
 

@@ -4,19 +4,32 @@
 #include "pluginterfaces/gui/iplugview.h"
 #include "pluginterfaces/vst/ivstparameterchanges.h"
 
+#include <algorithm>
+#include <cstdint>
 #include <cstring>
+
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#else
+#include <X11/Xlib.h>
+#endif
 
 namespace Steinberg {
 namespace Vst {
 
 static constexpr ParamID kGainId = 100;
 
-// HOST-07. Accepts the embed handshake for HWND and X11. The parent is stored.
-// A native child window is not created here; the host still drives attached() and removed().
+// HOST-07. Creates a native child (HWND or X11) and paints the gain view into it.
 class GainView final : public IPlugView {
 public:
     GainView() { FUNKNOWN_CTOR }
-    ~GainView() { FUNKNOWN_DTOR }
+    ~GainView() {
+        destroyNative();
+        FUNKNOWN_DTOR
+    }
 
     DECLARE_FUNKNOWN_METHODS
 
@@ -30,10 +43,12 @@ public:
     tresult PLUGIN_API attached(void* parent, FIDString type) SMTG_OVERRIDE {
         if (!parent || isPlatformTypeSupported(type) != kResultTrue)
             return kResultFalse;
+        destroyNative();
         parent_ = parent;
-        return kResultOk;
+        return createNative() ? kResultOk : kResultFalse;
     }
     tresult PLUGIN_API removed() SMTG_OVERRIDE {
+        destroyNative();
         parent_ = nullptr;
         return kResultOk;
     }
@@ -43,16 +58,15 @@ public:
     tresult PLUGIN_API getSize(ViewRect* size) SMTG_OVERRIDE {
         if (!size)
             return kInvalidArgument;
-        size->left = 0;
-        size->top = 0;
-        size->right = 480;
-        size->bottom = 300;
+        *size = rect_;
         return kResultOk;
     }
     tresult PLUGIN_API onSize(ViewRect* newSize) SMTG_OVERRIDE {
-        if (!newSize)
+        if (!newSize || newSize->getWidth() < 1 || newSize->getHeight() < 1)
             return kInvalidArgument;
         rect_ = *newSize;
+        resizeNative();
+        paintNative();
         return kResultOk;
     }
     tresult PLUGIN_API onFocus(TBool) SMTG_OVERRIDE { return kResultOk; }
@@ -60,19 +74,144 @@ public:
         frame_ = frame;
         return kResultOk;
     }
-    tresult PLUGIN_API canResize() SMTG_OVERRIDE { return kResultFalse; }
+    tresult PLUGIN_API canResize() SMTG_OVERRIDE { return kResultTrue; }
     tresult PLUGIN_API checkSizeConstraint(ViewRect* rect) SMTG_OVERRIDE {
         if (!rect)
             return kInvalidArgument;
-        rect->right = rect->left + 480;
-        rect->bottom = rect->top + 300;
+        if (rect->getWidth() < 160)
+            rect->right = rect->left + 160;
+        if (rect->getHeight() < 120)
+            rect->bottom = rect->top + 120;
         return kResultOk;
     }
 
 private:
+    bool createNative() {
+        const int w = rect_.getWidth();
+        const int h = rect_.getHeight();
+#if defined(_WIN32)
+        static bool registered = false;
+        if (!registered) {
+            WNDCLASSW cls {};
+            cls.lpfnWndProc = DefWindowProcW;
+            cls.hInstance = GetModuleHandleW(nullptr);
+            cls.lpszClassName = L"GhovlzGainView";
+            cls.hbrBackground = CreateSolidBrush(RGB(10, 10, 10));
+            registered = RegisterClassW(&cls) != 0;
+        }
+        hwnd_ = CreateWindowExW(0, L"GhovlzGainView", L"", WS_CHILD | WS_VISIBLE, 0, 0, w, h,
+                                static_cast<HWND>(parent_), nullptr, GetModuleHandleW(nullptr), nullptr);
+        if (!hwnd_)
+            return false;
+        paintNative();
+        return true;
+#else
+        display_ = XOpenDisplay(nullptr);
+        if (!display_)
+            return false;
+        const Window parent = static_cast<Window>(reinterpret_cast<uintptr_t>(parent_));
+        XSetWindowAttributes attr {};
+        attr.background_pixel = 0x000A0A0A;
+        attr.backing_store = Always;
+        child_ = XCreateWindow(display_, parent, 0, 0, static_cast<unsigned>(w), static_cast<unsigned>(h), 0, CopyFromParent,
+                               InputOutput, CopyFromParent, CWBackPixel | CWBackingStore, &attr);
+        if (!child_) {
+            XCloseDisplay(display_);
+            display_ = nullptr;
+            return false;
+        }
+        gc_ = XCreateGC(display_, child_, 0, nullptr);
+        XMapWindow(display_, child_);
+        paintNative();
+        XFlush(display_);
+        return true;
+#endif
+    }
+    void resizeNative() {
+        const int w = rect_.getWidth();
+        const int h = rect_.getHeight();
+#if defined(_WIN32)
+        if (hwnd_)
+            MoveWindow(hwnd_, 0, 0, w, h, TRUE);
+#else
+        if (display_ && child_) {
+            XResizeWindow(display_, child_, static_cast<unsigned>(w), static_cast<unsigned>(h));
+            XSync(display_, False);
+        }
+#endif
+    }
+    void paintNative() {
+        const int w = std::max(1, rect_.getWidth());
+        const int h = std::max(1, rect_.getHeight());
+#if defined(_WIN32)
+        if (!hwnd_)
+            return;
+        HDC hdc = GetDC(hwnd_);
+        if (!hdc)
+            return;
+        RECT rc {0, 0, w, h};
+        HBRUSH bg = CreateSolidBrush(RGB(10, 10, 10));
+        FillRect(hdc, &rc, bg);
+        DeleteObject(bg);
+        HBRUSH gold = CreateSolidBrush(RGB(180, 150, 55));
+        SelectObject(hdc, gold);
+        const int cx = w / 2;
+        const int cy = h / 2;
+        Ellipse(hdc, cx - 36, cy - 36, cx + 36, cy + 36);
+        DeleteObject(gold);
+        SetBkMode(hdc, TRANSPARENT);
+        SetTextColor(hdc, RGB(245, 245, 245));
+        TextOutW(hdc, 16, 16, L"GHOVLZ Gain", 11);
+        ReleaseDC(hwnd_, hdc);
+#else
+        if (!display_ || !child_ || !gc_)
+            return;
+        for (int attempt = 0; attempt < 40; ++attempt) {
+            XWindowAttributes attrs {};
+            if (XGetWindowAttributes(display_, child_, &attrs) && attrs.map_state == IsViewable)
+                break;
+            XSync(display_, False);
+        }
+        XSetForeground(display_, gc_, 0x000A0A0A);
+        XFillRectangle(display_, child_, gc_, 0, 0, static_cast<unsigned>(w), static_cast<unsigned>(h));
+        XSetForeground(display_, gc_, 0x00B49637);
+        XFillRectangle(display_, child_, gc_, 0, 0, static_cast<unsigned>(w), 8);
+        XFillArc(display_, child_, gc_, w / 2 - 36, h / 2 - 36, 72, 72, 0, 360 * 64);
+        XSetForeground(display_, gc_, 0x00F5F5F5);
+        XDrawString(display_, child_, gc_, 16, 28, "GHOVLZ Gain", 11);
+        XSync(display_, False);
+#endif
+    }
+    void destroyNative() {
+#if defined(_WIN32)
+        if (hwnd_) {
+            DestroyWindow(hwnd_);
+            hwnd_ = nullptr;
+        }
+#else
+        if (display_) {
+            if (gc_)
+                XFreeGC(display_, gc_);
+            if (child_)
+                XDestroyWindow(display_, child_);
+            XCloseDisplay(display_);
+        }
+        display_ = nullptr;
+        child_ = 0;
+        gc_ = nullptr;
+#endif
+    }
+
     void* parent_ = nullptr;
     IPlugFrame* frame_ = nullptr;
     ViewRect rect_ {0, 0, 480, 300};
+#if defined(_WIN32)
+    HWND hwnd_ = nullptr;
+#else
+    Display* display_ = nullptr;
+    Window child_ = 0;
+    GC gc_ = nullptr;
+#endif
 };
 
 tresult PLUGIN_API GainView::queryInterface(const TUID iid, void** obj) {
