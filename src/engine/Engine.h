@@ -107,31 +107,30 @@ private:
 
     Graph* acquire() const;
     void releaseGraph() const;
-    bool graphPinned(std::uintptr_t stamp) const;
-    static std::uintptr_t packGraph(Graph* graph, uint32_t seq);
-    static Graph* unpackGraph(std::uintptr_t stamp);
 
     std::shared_ptr<Project> project_;
-    // High 16 bits are a publish sequence. Reusing a graph address must not
-    // look like the pointer a reader already loaded.
-    mutable std::atomic<std::uintptr_t> published_ {0};
-    uint32_t publishSeq_ = 1;
+    // Published through atomic_load / atomic_store. The audio thread copies it
+    // and holds the copy until releaseGraph(), so a replaced graph stays alive.
+    std::shared_ptr<Graph> publishedGraph_;
+    // Readers inside acquire/release. Recording waits for this to hit zero
+    // before it reuses a take buffer.
     mutable std::atomic<int> readers_ {0};
-    // Hazard slots. A reader stores the stamped graph it is using here before touching it.
-    // publish() will not destroy a graph while any slot still names that stamp.
-    struct Hazard {
-        std::atomic<std::uintptr_t> ptr {0};
+    // A reader that holds the last reference parks it here. drainRetired()
+    // runs on the thread that publishes, so the audio thread does not free.
+    struct Retired {
+        std::shared_ptr<Graph> graph;
+        std::atomic<int> state {0};
     };
-    mutable Hazard hazards_[8];
-    static constexpr std::uintptr_t kClaimed = 1;
+    static constexpr int kParked = 16;
+    mutable Retired parked_[kParked];
     struct PinState {
-        Hazard* slot = nullptr;
+        std::shared_ptr<Graph> keep;
         Graph* held = nullptr;
-        std::uintptr_t stamp = 0;
         int depth = 0;
     };
     static PinState& pinState();
-    std::vector<std::unique_ptr<Graph>> owned_;
+    void retireGraph(std::shared_ptr<Graph> graph) const;
+    void drainRetired();
     std::shared_ptr<PluginHost> plugins_;
     double sampleRate_ = 48000;
     int block_ = 512;

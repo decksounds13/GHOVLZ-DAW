@@ -221,37 +221,39 @@ Engine::~Engine() {
         delete thread;
         writer_ = nullptr;
     }
-    published_.store(0, std::memory_order_seq_cst);
+    std::atomic_store(&publishedGraph_, std::shared_ptr<Graph>{});
     while (readers_.load(std::memory_order_seq_cst) != 0) {
     }
-    while (graphPinned(0)) {
+    drainRetired();
+}
+
+void Engine::retireGraph(std::shared_ptr<Graph> graph) const {
+    if (!graph)
+        return;
+    for (auto& slot : parked_) {
+        int empty = 0;
+        if (!slot.state.compare_exchange_strong(empty, 2, std::memory_order_acq_rel))
+            continue;
+        slot.graph = std::move(graph);
+        slot.state.store(1, std::memory_order_release);
+        return;
     }
-    owned_.clear();
+    graph.reset();
 }
 
-std::uintptr_t Engine::packGraph(Graph* graph, uint32_t seq) {
-    const auto addr = reinterpret_cast<std::uintptr_t>(graph) & 0x0000FFFFFFFFFFFFULL;
-    return addr | (static_cast<std::uintptr_t>(seq & 0xFFFFu) << 48);
-}
-
-Engine::Graph* Engine::unpackGraph(std::uintptr_t stamp) {
-    return reinterpret_cast<Graph*>(stamp & 0x0000FFFFFFFFFFFFULL);
+void Engine::drainRetired() {
+    for (auto& slot : parked_) {
+        if (slot.state.load(std::memory_order_acquire) != 1)
+            continue;
+        std::shared_ptr<Graph> graph = std::move(slot.graph);
+        slot.state.store(0, std::memory_order_release);
+        graph.reset();
+    }
 }
 
 Engine::PinState& Engine::pinState() {
     thread_local PinState pin;
     return pin;
-}
-
-bool Engine::graphPinned(std::uintptr_t stamp) const {
-    for (const auto& hazard : hazards_) {
-        const std::uintptr_t held = hazard.ptr.load(std::memory_order_seq_cst);
-        if (held == 0)
-            continue;
-        if (stamp == 0 || held == stamp || held == kClaimed)
-            return true;
-    }
-    return false;
 }
 
 Engine::Graph* Engine::acquire() const {
@@ -260,34 +262,15 @@ Engine::Graph* Engine::acquire() const {
         ++pin.depth;
         return pin.held;
     }
-    Hazard* slot = nullptr;
-    for (;;) {
-        for (auto& hazard : hazards_) {
-            std::uintptr_t empty = 0;
-            if (hazard.ptr.compare_exchange_strong(empty, kClaimed, std::memory_order_seq_cst)) {
-                slot = &hazard;
-                break;
-            }
-        }
-        if (slot)
-            break;
-    }
-    std::uintptr_t stamp = 0;
-    do {
-        stamp = published_.load(std::memory_order_seq_cst);
-        slot->ptr.store(stamp, std::memory_order_seq_cst);
-    } while (published_.load(std::memory_order_seq_cst) != stamp);
-    Graph* graph = unpackGraph(stamp);
-    if (!graph) {
-        slot->ptr.store(0, std::memory_order_seq_cst);
+    pin.keep = std::atomic_load(&publishedGraph_);
+    pin.held = pin.keep.get();
+    if (!pin.held) {
+        pin.keep.reset();
         return nullptr;
     }
-    pin.slot = slot;
-    pin.held = graph;
-    pin.stamp = stamp;
     pin.depth = 1;
     readers_.fetch_add(1, std::memory_order_seq_cst);
-    return graph;
+    return pin.held;
 }
 
 void Engine::releaseGraph() const {
@@ -296,10 +279,10 @@ void Engine::releaseGraph() const {
         return;
     if (--pin.depth > 0)
         return;
-    pin.slot->ptr.store(0, std::memory_order_seq_cst);
-    pin.slot = nullptr;
+    std::shared_ptr<Graph> keep = std::move(pin.keep);
     pin.held = nullptr;
-    pin.stamp = 0;
+    if (keep && keep.use_count() == 1)
+        retireGraph(std::move(keep));
     readers_.fetch_sub(1, std::memory_order_seq_cst);
 }
 
@@ -345,15 +328,17 @@ std::shared_ptr<Device> Engine::makeLive(const DeviceState& state) {
 }
 
 void Engine::publish() {
+    drainRetired();
     if (!project_) {
-        published_.exchange(0, std::memory_order_seq_cst);
-        while (readers_.load(std::memory_order_seq_cst) != 0 || graphPinned(0)) {
+        std::atomic_store(&publishedGraph_, std::shared_ptr<Graph>{});
+        while (readers_.load(std::memory_order_seq_cst) != 0) {
         }
-        owned_.clear();
+        drainRetired();
         return;
     }
-    Graph* previous = unpackGraph(published_.load(std::memory_order_acquire));
-    auto g = std::make_unique<Graph>();
+    std::shared_ptr<Graph> previousKeep = std::atomic_load(&publishedGraph_);
+    Graph* previous = previousKeep.get();
+    auto g = std::make_shared<Graph>();
     g->bpm = project_->bpm;
     g->numerator = project_->numerator;
     g->denominator = project_->denominator;
@@ -499,20 +484,9 @@ void Engine::publish() {
             g->autos.push_back(std::move(apply));
     }
     g->ready.store(1, std::memory_order_release);
-    Graph* raw = g.get();
-    owned_.push_back(std::move(g));
-    uint32_t seq = publishSeq_++;
-    if ((seq & 0xFFFFu) == 0)
-        seq = publishSeq_++;
-    const std::uintptr_t stamped = packGraph(raw, seq);
-    const std::uintptr_t oldStamp = published_.exchange(stamped, std::memory_order_seq_cst);
-    Graph* old = unpackGraph(oldStamp);
-    if (old) {
-        while (graphPinned(oldStamp)) {
-        }
-        owned_.erase(std::remove_if(owned_.begin(), owned_.end(), [&](const std::unique_ptr<Graph>& p) { return p.get() == old; }),
-                     owned_.end());
-    }
+    std::atomic_store(&publishedGraph_, std::shared_ptr<Graph>(std::move(g)));
+    // previousKeep drops here. A reader that still holds the old graph parks
+    // it in parked_ when it finishes, and the next publish() frees it.
 }
 
 void Engine::setProject(std::shared_ptr<Project> project) {
