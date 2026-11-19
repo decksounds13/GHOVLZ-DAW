@@ -297,6 +297,38 @@ public:
         return w;
     }
 
+    void innerShadow(Rect r, float depth, Color color) override {
+        if (enterScale(r, &depth)) {
+            innerShadow(r, depth, color);
+            scaling_ = false;
+            return;
+        }
+        if (depth < 1.f || r.w < 2.f || r.h < 2.f)
+            return;
+        const float rad = std::min(depth, std::min(r.w, r.h) * 0.5f);
+        int x0 = std::max(0, static_cast<int>(std::floor(r.x)));
+        int y0 = std::max(0, static_cast<int>(std::floor(r.y)));
+        int x1 = std::min(w_, static_cast<int>(std::ceil(r.x + r.w)));
+        int y1 = std::min(h_, static_cast<int>(std::ceil(r.y + r.h)));
+        for (int y = y0; y < y1; ++y) {
+            for (int x = x0; x < x1; ++x) {
+                const float px = x + 0.5f;
+                const float py = y + 0.5f;
+                if (!insideClip(x, y) || !inRound(px, py, r, rad))
+                    continue;
+                const float dx = std::min(px - r.x, r.x + r.w - px);
+                const float dy = std::min(py - r.y, r.y + r.h - py);
+                const float edge = std::min(dx, dy);
+                if (edge >= depth)
+                    continue;
+                const float t = 1.f - edge / depth;
+                Color c = color;
+                c.a = static_cast<uint8_t>(std::clamp(color.a * t * t, 0.f, 255.f));
+                blend(x, y, c);
+            }
+        }
+    }
+
     void dropShadow(Rect r, float radius, float blur, Color color) override {
         const int pad = blurRadius(blur) * 2 + 2;
         const int bw = std::max(1, static_cast<int>(std::ceil(r.w))) + pad * 2;

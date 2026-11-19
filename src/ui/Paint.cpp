@@ -111,9 +111,26 @@ std::string positionText(double q) {
 }
 
 void panelBox(Canvas& c, Rect r, float radius = 8.f) {
-    c.dropShadow(r, radius, 8.f, Color{0, 0, 0, 150});
+    c.dropShadow(r, radius, 12.f, Color{0, 0, 0, 170});
     c.fillRoundRect(r, radius, panel());
+    c.innerShadow(r, 12.f, Color{0, 0, 0, 150});
     c.strokeRect(r, line(), 1.f);
+}
+
+Color mixToward(Color src, Color toward, float t) {
+    auto ch = [](uint8_t a, uint8_t b, float u) {
+        return static_cast<uint8_t>(std::clamp(a + (b - a) * u, 0.f, 255.f));
+    };
+    return Color{ch(src.r, toward.r, t), ch(src.g, toward.g, t), ch(src.b, toward.b, t), 255};
+}
+
+Color trackBody(uint32_t argb) {
+    return mixToward(Color::argb(argb), Color::argb(0xFF120E0C), 0.38f);
+}
+
+void centered(Canvas& c, const std::string& text, float cx, float y, float size, Color col, bool bold) {
+    const float w = c.textWidth(text, size, bold);
+    c.drawText(text, cx - w * 0.5f, y, size, col, bold);
 }
 
 const Image& knobFilm() {
@@ -134,27 +151,48 @@ void miniKnob(Canvas& c, float cx, float cy, float radius, float norm) {
            Color::argb(0xFFD1BCAC), 1.6f);
 }
 
-void knob(Canvas& c, float cx, float cy, float norm, const std::string& label, const std::string& value) {
+void darkKnob(Canvas& c, float cx, float cy, float diameter, float norm, const std::string& label, const std::string& value) {
     norm = std::clamp(norm, 0.f, 1.f);
-    const float size = 52.f;
+    const float rad = diameter * 0.5f;
+    c.dropShadow({cx - rad, cy - rad + 2.f, diameter, diameter}, rad, 6.f, Color{0, 0, 0, 170});
     const Image& film = knobFilm();
     const int frameSize = film.w > 0 ? film.w : 220;
     const int frames = film.w > 0 ? std::max(1, film.h / frameSize) : 1;
     if (film.w > 0) {
         const int frame = std::clamp(static_cast<int>(std::lround(norm * (frames - 1))), 0, frames - 1);
         c.drawImage(film, {0, static_cast<float>(frame * frameSize), static_cast<float>(frameSize), static_cast<float>(frameSize)},
-                    {cx - size * 0.5f, cy - size * 0.5f, size, size});
+                    {cx - rad, cy - rad, diameter, diameter});
     } else {
-        c.fillEllipse(cx, cy, size * 0.5f, size * 0.5f, Color::argb(0xFF231F20));
+        c.fillEllipse(cx, cy, rad, rad, active().color(Role::Knob));
+        c.innerShadow({cx - rad, cy - rad, diameter, diameter}, 8.f, Color{0, 0, 0, 160});
+        const float a0 = -kPi * 0.5f - 145.f * kPi / 180.f;
+        const float ang = a0 + ((-kPi * 0.5f + 145.f * kPi / 180.f) - a0) * norm;
+        c.line(cx + std::cos(ang) * (rad * 0.22f), cy + std::sin(ang) * (rad * 0.22f),
+               cx + std::cos(ang) * (rad * 0.78f), cy + std::sin(ang) * (rad * 0.78f), active().color(Role::Pointer),
+               std::max(1.6f, diameter * 0.045f));
     }
     const float a0 = -kPi * 0.5f - 145.f * kPi / 180.f;
     const float a1 = -kPi * 0.5f + 145.f * kPi / 180.f;
-    c.arc(cx, cy, size * 0.5f + 4.f, a0, a0 + (a1 - a0) * norm, orange(), 2.4f);
-    const float ang = a0 + (a1 - a0) * norm;
-    c.line(cx + std::cos(ang) * 6.f, cy + std::sin(ang) * 6.f, cx + std::cos(ang) * 18.f, cy + std::sin(ang) * 18.f,
-           Color::argb(0xFFD1BCAC), 2.2f);
-    c.drawText(label, cx - 28.f, cy + 30.f, 13.f, dim(), false);
-    c.drawText(value, cx - 24.f, cy + 46.f, 13.f, ink(), false);
+    c.arc(cx, cy, rad + 3.f, a0, a1, Color::argb(0xFF3C3732), 2.2f);
+    c.arc(cx, cy, rad + 3.f, a0, a0 + (a1 - a0) * norm, active().color(Role::Arc), 2.6f);
+    if (!label.empty())
+        centered(c, label, cx, cy + rad + 8.f, 18.f, dim(), false);
+    if (!value.empty())
+        centered(c, value, cx, cy + rad + 26.f, 18.f, ink(), true);
+}
+
+void knob(Canvas& c, float cx, float cy, float norm, const std::string& label, const std::string& value) {
+    darkKnob(c, cx, cy, 48.f, norm, label, value);
+}
+
+void goldCap(Canvas& c, float x, float y, float w, float h) {
+    Rect r{x, y, w, h};
+    c.dropShadow(r, 3.f, 4.f, Color{0, 0, 0, 160});
+    c.fillRoundRect(r, 3.f, Color::argb(0xFF7A5A22));
+    c.fillRoundRect({r.x + 1.f, r.y + 1.f, r.w - 2.f, r.h * 0.42f}, 2.f, Color::argb(0xFFE6C56A));
+    c.fillRect({r.x + 3.f, r.y + r.h * 0.46f, r.w - 6.f, 2.f}, Color::argb(0xFF4A3414));
+    c.fillRoundRect({r.x + 1.f, r.y + r.h * 0.55f, r.w - 2.f, r.h * 0.38f}, 2.f, Color::argb(0xFFB49637));
+    c.innerShadow(r, 3.f, Color{0, 0, 0, 80});
 }
 
 void playGlyph(Canvas& c, float x, float y, float s, Color col) {
@@ -171,9 +209,10 @@ void transportButton(Canvas& c, Rect r, bool on) {
 }
 
 void pill(Canvas& c, Rect r, const char* text, bool on) {
-    c.fillRoundRect(r, 4.f, on ? gold() : Color::argb(0xFF2A241E));
-    const float size = r.h >= 20.f ? 18.f : std::max(12.f, r.h - 2.f);
-    c.drawText(text, r.x + 4.f, r.y + 1.f, size, on ? Color::argb(0xFF1A120C) : dim(), true);
+    c.fillRoundRect(r, std::min(6.f, r.h * 0.35f), on ? gold() : Color::argb(0xFF2A241E));
+    c.innerShadow(r, 3.f, Color{0, 0, 0, static_cast<uint8_t>(on ? 50 : 120)});
+    const float size = r.h >= 20.f ? 18.f : std::max(11.f, r.h - 4.f);
+    centered(c, text, r.x + r.w * 0.5f, r.y + (r.h - size) * 0.45f, size, on ? Color::argb(0xFF1A120C) : dim(), true);
 }
 
 float dbNorm(float db) { return std::clamp((db + 60.f) / 66.f, 0.f, 1.f); }
@@ -214,9 +253,14 @@ void drawWave(Canvas& c, const Media* m, Rect r, Color col) {
             mn = std::min(mn, s);
             mx = std::max(mx, s);
         }
-        const float y0 = mid - mx * r.h * 0.46f;
-        const float y1 = mid - mn * r.h * 0.46f;
-        c.fillRect({r.x + static_cast<float>(x), y0, 1.f, std::max(1.f, y1 - y0)}, col);
+        const float env = std::clamp(std::max(std::fabs(mn), std::fabs(mx)), 0.f, 1.f);
+        const float shaped = std::max(0.18f, env) * (0.4f + 0.6f * std::fabs(std::sin(x * 0.65f)));
+        const float yTop = mid - shaped * r.h * 0.46f;
+        const float yBot = mid + shaped * r.h * 0.46f;
+        const float span = std::max(1.f, yBot - yTop);
+        const float lobe = std::max(1.f, span * 0.42f);
+        c.fillRect({r.x + static_cast<float>(x), yTop, 1.f, lobe}, col);
+        c.fillRect({r.x + static_cast<float>(x), yBot - lobe, 1.f, lobe}, col);
     }
 }
 
@@ -291,6 +335,39 @@ void topBar(Canvas& c, const Frame& f) {
     c.drawText(f.backend ? f.backend : "CPU", badge.x + 14.f, badge.y + 7.f, 14.f, rod(), true);
 }
 
+void glyphIcon(Canvas& c, int kind, float x, float y, Color col) {
+    if (kind == 0) {
+        c.line(x + 2, y + 10, x + 6, y + 4, col, 1.6f);
+        c.line(x + 6, y + 4, x + 8, y + 12, col, 1.6f);
+        c.line(x + 8, y + 12, x + 12, y + 2, col, 1.6f);
+        c.line(x + 12, y + 2, x + 16, y + 10, col, 1.6f);
+    } else if (kind == 1) {
+        c.fillRoundRect({x + 2, y + 4, 12, 10}, 2.f, col);
+        c.fillRect({x + 4, y + 2, 6, 4}, col);
+    } else if (kind == 2) {
+        c.fillRect({x + 3, y + 8, 3, 8}, col);
+        c.fillRect({x + 8, y + 4, 3, 12}, col);
+        c.fillRect({x + 13, y + 6, 3, 10}, col);
+    } else if (kind == 3) {
+        c.strokeRect({x + 2, y + 3, 14, 12}, col, 1.4f);
+        c.line(x + 2, y + 7, x + 16, y + 7, col, 1.4f);
+    } else if (kind == 4) {
+        c.line(x + 4, y + 14, x + 8, y + 3, col, 1.6f);
+        c.line(x + 8, y + 3, x + 12, y + 14, col, 1.6f);
+        c.line(x + 6, y + 10, x + 10, y + 10, col, 1.4f);
+    } else if (kind == 5) {
+        c.arc(x + 7, y + 7, 5.f, 0.2f, 5.8f, col, 1.6f);
+        c.line(x + 11, y + 11, x + 16, y + 16, col, 1.8f);
+    } else {
+        const float cx = x + 8.f, cy = y + 8.f;
+        for (int i = 0; i < 5; ++i) {
+            const float a0 = -kPi * 0.5f + i * (2.f * kPi / 5.f);
+            const float a1 = -kPi * 0.5f + ((i + 2) % 5) * (2.f * kPi / 5.f);
+            c.line(cx + std::cos(a0) * 7.f, cy + std::sin(a0) * 7.f, cx + std::cos(a1) * 7.f, cy + std::sin(a1) * 7.f, col, 1.4f);
+        }
+    }
+}
+
 void browserColumn(Canvas& c, const Frame& f, float h) {
     c.fillRect({0, kBarH, 156.f, h - kBarH}, Color::argb(0xFF0E0C0B));
     c.fillRect({155, kBarH, 1, h - kBarH}, line());
@@ -301,17 +378,28 @@ void browserColumn(Canvas& c, const Frame& f, float h) {
         const bool on = i == 0;
         if (on)
             c.fillRoundRect(r, 4.f, Color::argb(0xFF2A2118));
-        c.fillEllipse(20.f, r.y + 14.f, 4.f, 4.f, on ? amber() : Color::argb(0xFF3C3732));
+        glyphIcon(c, i, 10.f, r.y + 4.f, on ? amber() : Color::argb(0xFFD1BCAC));
         c.drawText(cats[i], 32.f, r.y + 4.f, 18.f, on ? ink() : dim(), on);
     }
+}
+
+std::string paramText(float v) {
+    char b[24];
+    if (v >= 100.f)
+        std::snprintf(b, sizeof(b), "%.0f", v);
+    else if (v > 1.5f)
+        std::snprintf(b, sizeof(b), "%.1f", v);
+    else
+        std::snprintf(b, sizeof(b), "%.2f", v);
+    return b;
 }
 
 void arrangement(Canvas& c, const Frame& f) {
     const float w = static_cast<float>(c.width());
     const float h = static_cast<float>(c.height());
     const float headerX = 156.f;
-    const float headerW = 188.f;
-    const float rightW = 92.f;
+    const float headerW = 160.f;
+    const float rightW = 86.f;
     const float laneX = headerX + headerW;
     const float laneR = w - rightW;
     const float rulerY = kBarH;
@@ -342,14 +430,14 @@ void arrangement(Canvas& c, const Frame& f) {
         for (const auto& m : f.project->markers) {
             const float x = xAt(m.quarter);
             c.fillEllipse(x, rulerY + 14.f, 4.f, 4.f, Color::argb(m.color));
-            c.drawText(m.name, x + 8.f, rulerY + 6.f, 13.f, Color::argb(m.color), true);
+            c.drawText(m.name, x + 8.f, rulerY + 4.f, 18.f, Color::argb(m.color), true);
         }
     }
     for (int bar = 1; bar <= 40; bar += 2) {
         const float x = xAt((bar - 1) * 4.0);
         if (x > laneR)
             break;
-        c.drawText(std::to_string(bar), x + 2.f, rulerY + 20.f, 12.f, dim(), false);
+        c.drawText(std::to_string(bar), x + 2.f, rulerY + 18.f, 14.f, dim(), false);
     }
     const double head = f.engine ? f.engine->playhead() : (f.project ? f.project->playhead : 0);
     const float hx = xAt(head);
@@ -360,63 +448,70 @@ void arrangement(Canvas& c, const Frame& f) {
         const float y = rowsTop + static_cast<float>(i) * rowH;
         c.fillRect({headerX, y, headerW, rowH - 1.f}, i % 2 ? Color::argb(0xFF120F0D) : Color::argb(0xFF161311));
         c.fillRect({headerX, y, 6.f, rowH - 1.f}, Color::argb(t->color));
-        c.drawText(t->name, headerX + 14.f, y + 4.f, 18.f, ink(), true);
-        miniKnob(c, headerX + 28.f, y + rowH * 0.62f, 11.f, dbNorm(t->volumeDb));
-        pill(c, {headerX + 48.f, y + rowH * 0.48f, 22.f, 16.f}, "M", t->mute);
-        pill(c, {headerX + 74.f, y + rowH * 0.48f, 22.f, 16.f}, "S", t->solo);
-        pill(c, {headerX + 100.f, y + rowH * 0.48f, 36.f, 16.f}, "Arm", t->arm);
+        c.drawText(t->name, headerX + 12.f, y + 4.f, 18.f, ink(), true);
+        drawStereo(c, f, t->id, {headerX + headerW - 20.f, y + 4.f, 16.f, std::max(16.f, rowH - 8.f)}, 0.62f);
+        const float pillY = y + std::max(26.f, rowH - 28.f);
+        pill(c, {headerX + 12.f, pillY, 30.f, 22.f}, "M", t->mute);
+        pill(c, {headerX + 46.f, pillY, 30.f, 22.f}, "S", t->solo);
+        pill(c, {headerX + 80.f, pillY, 48.f, 22.f}, "Arm", t->arm);
 
+        const Rect lane{laneX, y, laneR - laneX, std::max(1.f, rowH - 2.f)};
         c.fillRect({laneX, y, laneR - laneX, rowH - 1.f}, Color::argb(0xFF0C0B0A));
-        c.clip({laneX, y, laneR - laneX, rowH});
+        c.clip(lane);
         for (const auto& clip : t->clips) {
             const float x0 = xAt(clip.startQ);
             const float x1 = xAt(clip.startQ + clip.lengthQ);
             if (x1 < laneX || x0 > laneR)
                 continue;
-            Rect body{x0, y + 4.f, std::max(8.f, x1 - x0), rowH - 10.f};
-            c.fillRoundRect(body, 4.f, Color::argb(0xFF1A1410));
-            c.fillRect({body.x, body.y, 3.f, body.h}, Color::argb(clip.color ? clip.color : t->color));
-            c.fillRect({body.x, body.y, body.w, 16.f}, Color::argb(0xCC2A2118));
-            c.drawText(clip.name.empty() ? t->name : clip.name, body.x + 8.f, body.y + 1.f, 18.f, ink(), true);
-            Rect content{body.x + 2.f, body.y + 18.f, body.w - 4.f, body.h - 22.f};
+            const uint32_t tint = clip.color ? clip.color : t->color;
+            Rect body{x0, y + 3.f, std::max(8.f, x1 - x0), rowH - 8.f};
+            c.fillRoundRect(body, 5.f, trackBody(tint));
+            c.fillRect({body.x, body.y, body.w, 20.f}, mixToward(Color::argb(tint), Color::argb(0xFF1A140E), 0.25f));
+            c.fillRect({body.x, body.y, 4.f, body.h}, Color::argb(tint));
+            c.drawText(clip.name.empty() ? t->name : clip.name, body.x + 10.f, body.y + 1.f, 18.f, ink(), true);
+            Rect content{body.x + 4.f, body.y + 22.f, std::max(2.f, body.w - 8.f), std::max(4.f, body.h - 26.f)};
+            const Color wave = mixToward(Color::argb(tint), Color::argb(0xFFFFF2E0), 0.45f);
             if (!clip.notes.empty())
                 drawNotes(c, clip, content);
             else
-                drawWave(c, mediaOf(f.project, clip.mediaId), content, waveTint(clip.color ? clip.color : t->color));
+                drawWave(c, mediaOf(f.project, clip.mediaId), content, wave);
         }
         if (f.project) {
-            for (const auto& lane : f.project->automation) {
+            for (const auto& autoLane : f.project->automation) {
                 const std::string prefix = "track:" + t->id + ":";
-                if (lane.id.rfind(prefix, 0) != 0 || lane.points.size() < 2)
+                if (autoLane.id.rfind(prefix, 0) != 0 || autoLane.points.size() < 2)
                     continue;
-                float vmin = lane.points.front().value, vmax = vmin;
-                for (const auto& pt : lane.points) {
+                float vmin = autoLane.points.front().value, vmax = vmin;
+                for (const auto& pt : autoLane.points) {
                     vmin = std::min(vmin, pt.value);
                     vmax = std::max(vmax, pt.value);
                 }
                 const float spanV = std::max(0.001f, vmax - vmin);
-                const std::string label = lane.id.substr(prefix.size());
-                c.drawText(label == "cutoff" ? "Filter Cutoff" : label, laneX + 8.f, y + rowH - 18.f, 12.f, rod(), false);
-                float px = xAt(lane.points.front().quarter);
-                float py = y + 8.f + (1.f - (lane.points.front().value - vmin) / spanV) * (rowH - 20.f);
-                for (size_t p = 1; p < lane.points.size(); ++p) {
-                    const float nx = xAt(lane.points[p].quarter);
-                    const float ny = y + 8.f + (1.f - (lane.points[p].value - vmin) / spanV) * (rowH - 20.f);
-                    c.line(px, py, nx, ny, amber(), 1.8f);
+                const float y0 = y + 6.f;
+                const float y1 = y + rowH - 8.f;
+                auto yOf = [&](float v) {
+                    const float tnorm = std::clamp((v - vmin) / spanV, 0.f, 1.f);
+                    return std::clamp(y0 + (1.f - tnorm) * std::max(4.f, y1 - y0), y + 4.f, y + rowH - 6.f);
+                };
+                const std::string label = autoLane.id.substr(prefix.size());
+                c.drawText(label == "cutoff" ? "Filter Cutoff" : label, laneX + 8.f, y + 4.f, 18.f, rod(), false);
+                float px = std::clamp(xAt(autoLane.points.front().quarter), laneX, laneR);
+                float py = yOf(autoLane.points.front().value);
+                for (size_t p = 1; p < autoLane.points.size(); ++p) {
+                    const float nx = std::clamp(xAt(autoLane.points[p].quarter), laneX, laneR);
+                    const float ny = yOf(autoLane.points[p].value);
+                    c.line(px, py, nx, ny, amber(), 2.f);
                     px = nx;
                     py = ny;
                 }
             }
         }
+        c.line(std::clamp(hx, laneX, laneR), y + 1.f, std::clamp(hx, laneX, laneR), y + rowH - 3.f, rod(), 1.4f);
         c.resetClip();
 
         c.fillRect({laneR, y, rightW, rowH - 1.f}, Color::argb(0xFF120F0D));
-        miniKnob(c, laneR + 16.f, y + rowH * 0.38f, 9.f, (t->pan + 1.f) * 0.5f);
-        pill(c, {laneR + 30.f, y + 6.f, 18.f, 15.f}, "M", t->mute);
-        pill(c, {laneR + 50.f, y + 6.f, 18.f, 15.f}, "S", t->solo);
-        pill(c, {laneR + 30.f, y + 24.f, 36.f, 15.f}, "Arm", t->arm);
-        drawStereo(c, f, t->id, {laneR + 70.f, y + 10.f, 16.f, rowH - 22.f}, 0.35f);
-        c.line(hx, y, hx, y + rowH, rod(), 1.4f);
+        miniKnob(c, laneR + 22.f, y + rowH * 0.42f, 14.f, (t->pan + 1.f) * 0.5f);
+        drawStereo(c, f, t->id, {laneR + rightW - 22.f, y + 8.f, 14.f, rowH - 18.f}, 0.4f);
     }
     c.fillRoundRect({hx - 22.f, rulerY + 18.f, 52.f, 16.f}, 3.f, gold());
     c.drawText(flag, hx - 18.f, rulerY + 19.f, 12.f, Color::argb(0xFF1A120C), true);
@@ -435,18 +530,16 @@ void arrangement(Canvas& c, const Frame& f) {
             drawStereo(c, f, chain->id, {r.x + r.w - 28.f, r.y + 36.f, 16.f, r.h - 52.f}, 0.4f);
             int shown = 0;
             for (const auto& pr : d.params) {
-                if (shown >= 4)
+                if (shown >= 3)
                     break;
-                const float cxk = r.x + 36.f + static_cast<float>(shown) * 58.f;
-                if (cxk > r.x + r.w - 50.f)
+                const float cxk = r.x + 40.f + static_cast<float>(shown) * 78.f;
+                if (cxk + 24.f > r.x + r.w - 20.f)
                     break;
-                const float norm = knobNorm(pr.second);
-                miniKnob(c, cxk, r.y + 72.f, 18.f, norm);
-                c.drawText(pr.first, cxk - 24.f, r.y + 96.f, 18.f, dim(), false);
-                if (i + 1 < chain->devices.size())
-                    c.line(r.x + r.w, r.y + r.h * 0.5f, r.x + r.w + 10.f, r.y + r.h * 0.5f, gold(), 2.f);
+                darkKnob(c, cxk, r.y + 70.f, 48.f, knobNorm(pr.second), pr.first, paramText(pr.second));
                 ++shown;
             }
+            if (i + 1 < chain->devices.size())
+                c.line(r.x + r.w, r.y + r.h * 0.45f, r.x + r.w + 10.f, r.y + r.h * 0.45f, gold(), 2.f);
         }
     }
 }
@@ -480,26 +573,29 @@ void session(Canvas& c, const Frame& f) {
             const bool filled = s < static_cast<int>(t->slots.size()) && t->slots[static_cast<size_t>(s)];
             const bool playing = filled && s == f.sessionScene;
             c.clip(cell);
-            c.fillRoundRect(cell, 4.f, filled ? Color::argb(0xFF1C1814) : Color::argb(0xFF100E0C));
+            c.fillRoundRect(cell, 4.f, filled ? trackBody(t->color) : Color::argb(0xFF100E0C));
+            c.innerShadow(cell, 6.f, Color{0, 0, 0, 90});
             if (filled) {
                 const Clip& clip = *t->slots[static_cast<size_t>(s)];
-                const Color tint = Color::argb(clip.color ? clip.color : t->color);
-                c.fillRect({cell.x, cell.y, cell.w, 4.f}, tint);
+                const uint32_t tint = clip.color ? clip.color : t->color;
+                c.fillRect({cell.x, cell.y, cell.w, 4.f}, Color::argb(tint));
                 c.drawText(clip.name.empty() ? t->name : clip.name, cell.x + 6.f, cell.y + 6.f, 18.f, ink(), true);
                 Rect wave{cell.x + 4.f, cell.y + 26.f, cell.w - 8.f, std::max(4.f, cell.h - 32.f)};
                 if (!clip.notes.empty())
                     drawNotes(c, clip, wave);
                 else
-                    drawWave(c, mediaOf(f.project, clip.mediaId), wave, waveTint(t->color));
+                    drawWave(c, mediaOf(f.project, clip.mediaId), wave, mixToward(Color::argb(tint), ink(), 0.35f));
             }
             if (playing)
                 c.strokeRect(cell, gold(), 2.f);
             c.resetClip();
         }
         Rect mix{x, h - mixerH + 8.f, colW - 6.f, mixerH - 16.f};
+        c.dropShadow(mix, 6.f, 6.f, Color{0, 0, 0, 120});
         c.fillRoundRect(mix, 6.f, Color::argb(0xFF120F0D));
-        miniKnob(c, mix.x + 22.f, mix.y + 28.f, 14.f, dbNorm(t->volumeDb));
-        c.drawText(t->name, mix.x + 40.f, mix.y + 8.f, 18.f, ink(), true);
+        c.innerShadow(mix, 8.f, Color{0, 0, 0, 100});
+        darkKnob(c, mix.x + 28.f, mix.y + 48.f, 36.f, dbNorm(t->volumeDb), "", "");
+        c.drawText(t->name, mix.x + 50.f, mix.y + 8.f, 18.f, ink(), true);
         drawStereo(c, f, t->id, {mix.x + mix.w - 22.f, mix.y + 12.f, 14.f, mix.h - 24.f}, 0.4f);
     }
     for (int s = 0; s < nScenes; ++s) {
@@ -514,44 +610,51 @@ void session(Canvas& c, const Frame& f) {
 void perform(Canvas& c, const Frame& f) {
     const float w = static_cast<float>(c.width());
     const float h = static_cast<float>(c.height());
-    const float side = 220.f;
-    c.drawText("PERFORM", 170.f, kBarH + 8.f, 18.f, dim(), true);
+    const float side = 120.f;
+    const float barH = 168.f;
     const char* names[] = {
-        "Intro", "Verse", "Build", "Drop", "Break", "Drop 2", "Outro", "End",
-        "Kick", "Drums", "Snare", "Hat", "Bass", "Lead", "Pads", "Vox",
-        "Filter", "Wash", "Chop", "Stutter", "Rise", "Impact", "Tape", "Space",
-        "Delay", "Verb", "Drive", "Width", "Gate", "Side", "Duck", "Air",
-        "Scene A", "Scene B", "Scene C", "Scene D", "Loop", "Fill", "Hit", "Riser",
-        "Macro 1", "Macro 2", "Macro 3", "Macro 4", "Macro 5", "Macro 6", "Macro 7", "Macro 8"};
+        "Kick Loop", "Bassline", "Lead Synth", "Vocal Chop", "Pad Chords", "FX Rise", "Sub Hit", "Perc Fill",
+        "Main Kick", "808 Bass", "Saw Lead", "Vox Ahh", "Atmosphere", "Impact", "Sub Bass", "Clap",
+        "Snare", "Bass Fill", "Arp", "Vocal", "Strings", "Glitch", "Sub", "Shaker",
+        "Tom", "Bass Drop", "Pluck", "Breath", "Drone", "Noise", "Sub Low", "Cowbell",
+        "Clap", "Bass Run", "Bell", "Talkbox", "Piano", "Sweep", "Sub Pulse", "Conga",
+        "Crash", "Bass End", "Stab", "Vocal End", "Pad End", "Down", "Sub End", "Perc End"};
+    const uint32_t warm[] = {0xFF8A5A28, 0xFF6E4A2E, 0xFFB49637, 0xFF8C6230, 0xFF6A5438, 0xFFAA6A22, 0xFF7A5340, 0xFFDAA520};
     const int cols = 8;
     const int rows = 6;
     const float padW = (w - side - 180.f) / cols;
-    const float padH = (h - kBarH - 48.f) / rows;
+    const float padH = (h - kBarH - barH - 16.f) / rows;
     for (int i = 0; i < cols * rows; ++i) {
         const int col = i % cols;
         const int row = i / cols;
-        Rect r{168.f + col * padW, kBarH + 36.f + row * padH, padW - 6.f, padH - 6.f};
-        const bool on = i == 3;
-        c.fillRoundRect(r, 6.f, on ? Color::argb(0xFF3A2A16) : Color::argb(0xFF161311));
-        c.strokeRect(r, on ? gold() : line(), on ? 2.f : 1.f);
-        c.drawText(names[i], r.x + 8.f, r.y + r.h * 0.35f, 18.f, on ? rod() : ink(), true);
+        Rect r{168.f + col * padW, kBarH + 12.f + row * padH, padW - 8.f, padH - 8.f};
+        const bool on = i == 11;
+        c.dropShadow(r, 6.f, 6.f, Color{0, 0, 0, 120});
+        c.fillRoundRect(r, 8.f, Color::argb(0xFF161311));
+        c.innerShadow(r, 8.f, Color{0, 0, 0, 110});
+        c.fillRect({r.x, r.y, r.w, 8.f}, Color::argb(warm[(col + row) % 8]));
+        if (on)
+            c.strokeRect(r, gold(), 2.f);
+        c.drawText(names[i], r.x + 10.f, r.y + r.h * 0.38f, 18.f, ink(), true);
     }
-    const float sx = w - side + 8.f;
-    c.drawText("SCENES", sx, kBarH + 8.f, 18.f, dim(), true);
-    for (int s = 0; s < 8; ++s) {
-        Rect r{sx, kBarH + 36.f + s * 36.f, side - 24.f, 30.f};
+    const char* scenes[] = {"Intro", "Verse", "Build", "Drop", "Break", "Outro"};
+    for (int s = 0; s < 6; ++s) {
+        const float cy = kBarH + 36.f + s * ((h - kBarH - barH - 24.f) / 6.f);
         const bool on = f.sessionScene == s;
-        c.fillRoundRect(r, 4.f, on ? Color::argb(0xFF3A2E1C) : Color::argb(0xFF161311));
-        c.strokeRect(r, on ? gold() : line(), 1.f);
-        c.drawText(names[s], r.x + 8.f, r.y + 4.f, 18.f, on ? rod() : ink(), true);
+        c.fillEllipse(w - 60.f, cy, 28.f, 28.f, on ? gold() : Color::argb(0xFF2A2118));
+        c.innerShadow({w - 88.f, cy - 28.f, 56.f, 56.f}, 6.f, Color{0, 0, 0, 80});
+        centered(c, scenes[s], w - 60.f, cy - 8.f, 14.f, on ? Color::argb(0xFF1A120C) : ink(), true);
     }
-    const float macroY = kBarH + 36.f + 8 * 36.f + 8.f;
-    c.drawText("MACROS", sx, macroY, 18.f, dim(), true);
+    Rect bar{156.f, h - barH, w - 164.f, barH - 12.f};
+    panelBox(c, bar, 10.f);
+    const char* macros[] = {"Filter", "Space", "Drive", "Width", "Crush", "Delay", "Tone", "Glue"};
     for (int m = 0; m < 8; ++m)
-        miniKnob(c, sx + 16.f + (m % 4) * 48.f, macroY + 36.f + (m / 4) * 48.f, 14.f, 0.35f + m * 0.05f);
-    Rect xf{sx, h - 48.f, side - 24.f, 18.f};
+        darkKnob(c, bar.x + 56.f + m * 130.f, bar.y + 62.f, 48.f, 0.35f + m * 0.05f, macros[m], "");
+    Rect xf{bar.x + bar.w - 280.f, bar.y + 70.f, 120.f, 8.f};
     c.fillRoundRect(xf, 4.f, Color::argb(0xFF1A1614));
-    c.fillRect({xf.x + xf.w * 0.45f, xf.y, 8.f, xf.h}, gold());
+    goldCap(c, xf.x + xf.w * 0.45f, xf.y - 8.f, 18.f, 24.f);
+    c.drawText("128.00", bar.x + bar.w - 140.f, bar.y + 48.f, 28.f, rod(), true);
+    c.drawText("BPM", bar.x + bar.w - 140.f, bar.y + 82.f, 18.f, dim(), false);
 }
 
 void mixer(Canvas& c, const Frame& f) {
@@ -567,27 +670,28 @@ void mixer(Canvas& c, const Frame& f) {
     for (size_t i = 0; i < chans.size(); ++i) {
         const Track* t = chans[i];
         Rect r{6.f + static_cast<float>(i) * stripW, kBarH + 8.f, stripW - 6.f, h - kBarH - 16.f};
-        c.fillRoundRect(r, 6.f, Color::argb(0xFF120F0D));
-        c.strokeRect(r, t->id == "lead" ? gold() : line(), t->id == "lead" ? 2.f : 1.f);
-        c.fillRect({r.x, r.y, r.w, 4.f}, Color::argb(t->color));
-        c.drawText(t->name, r.x + 8.f, r.y + 10.f, 14.f, ink(), true);
-        c.drawText("In: All Ins", r.x + 8.f, r.y + 30.f, 12.f, dim(), false);
-        c.drawText(std::string("Out: ") + (t->output.empty() ? "Master" : t->output), r.x + 8.f, r.y + 46.f, 12.f, dim(), false);
-        for (int s = 0; s < 3; ++s) {
-            Rect slot{r.x + 8.f, r.y + 68.f + s * 22.f, r.w - 16.f, 20.f};
-            c.fillRoundRect(slot, 3.f, Color::argb(0xFF1C1814));
-            const char* label = "—";
-            std::string owned;
-            if (s < static_cast<int>(t->devices.size())) {
+        const bool selected = t->id == "lead";
+        c.dropShadow(r, 8.f, 10.f, Color{0, 0, 0, 150});
+        c.fillRoundRect(r, 8.f, Color::argb(0xFF120F0D));
+        c.innerShadow(r, 14.f, Color{0, 0, 0, 130});
+        c.strokeRect(r, selected ? gold() : line(), selected ? 2.f : 1.f);
+        c.fillRect({r.x, r.y, r.w, 5.f}, Color::argb(t->color));
+        c.drawText(t->name, r.x + 8.f, r.y + 12.f, 18.f, ink(), true);
+        c.drawText("In  All Ins", r.x + 8.f, r.y + 36.f, 14.f, dim(), false);
+        const std::string out = t->output.empty() || t->id == "master" ? "Master" : t->output;
+        c.drawText(std::string("Out  ") + out, r.x + 8.f, r.y + 54.f, 14.f, dim(), false);
+
+        const int slots = 4;
+        for (int s = 0; s < slots; ++s) {
+            Rect slot{r.x + 8.f, r.y + 80.f + s * 26.f, r.w - 16.f, 22.f};
+            c.fillRoundRect(slot, 4.f, Color::argb(0xFF1A1612));
+            c.innerShadow(slot, 3.f, Color{0, 0, 0, 110});
+            std::string owned = "—";
+            if (s < static_cast<int>(t->devices.size()))
                 owned = t->devices[static_cast<size_t>(s)].name;
-                label = owned.c_str();
-            }
-            c.drawText(label, slot.x + 6.f, slot.y + 2.f, 12.f, dim(), false);
+            c.drawText(owned, slot.x + 6.f, slot.y + 2.f, 14.f, owned == "—" ? dim() : ink(), false);
         }
-        miniKnob(c, r.x + r.w * 0.5f, r.y + 168.f, 16.f, (t->pan + 1.f) * 0.5f);
-        char pan[16];
-        std::snprintf(pan, sizeof(pan), "%+.1f", t->pan);
-        c.drawText(pan, r.x + r.w * 0.5f - 16.f, r.y + 188.f, 12.f, dim(), false);
+
         float a = -100.f, b = -100.f;
         for (const auto& s : t->sends) {
             if (s.target == "retA")
@@ -595,28 +699,107 @@ void mixer(Canvas& c, const Frame& f) {
             if (s.target == "retB")
                 b = s.levelDb;
         }
-        miniKnob(c, r.x + 28.f, r.y + 226.f, 11.f, dbNorm(a));
-        miniKnob(c, r.x + 64.f, r.y + 226.f, 11.f, dbNorm(b));
-        c.drawText("A", r.x + 22.f, r.y + 240.f, 12.f, dim(), false);
-        c.drawText("B", r.x + 58.f, r.y + 240.f, 12.f, dim(), false);
+        const float sendY = r.y + 214.f;
+        darkKnob(c, r.x + r.w * 0.32f, sendY, 44.f, dbNorm(a), "A", a <= -80.f ? "-inf" : paramText(a));
+        darkKnob(c, r.x + r.w * 0.72f, sendY, 44.f, dbNorm(b), "B", b <= -80.f ? "-inf" : paramText(b));
 
-        const float faderTop = r.y + 268.f;
-        const float faderBot = r.y + r.h - 46.f;
-        const float faderX = r.x + 36.f;
-        c.fillRect({faderX, faderTop, 6.f, faderBot - faderTop}, Color::argb(0xFF2A241E));
+        char pan[16];
+        std::snprintf(pan, sizeof(pan), "%+.1f", t->pan);
+        const float panY = r.y + 320.f;
+        darkKnob(c, r.x + r.w * 0.5f, panY, 48.f, (t->pan + 1.f) * 0.5f, "Pan", pan);
+        char db[16];
+        std::snprintf(db, sizeof(db), "%+.1f dB", t->volumeDb);
+        centered(c, db, r.x + r.w * 0.5f, panY + 78.f, 18.f, rod(), true);
+
+        const float faderTop = panY + 108.f;
+        const float faderBot = r.y + r.h - 72.f;
+        const float faderX = r.x + 46.f;
+        const float faderH = std::max(40.f, faderBot - faderTop);
+        Rect well{faderX, faderTop, 14.f, faderH};
+        c.fillRoundRect(well, 4.f, Color::argb(0xFF1A1614));
+        c.innerShadow(well, 4.f, Color{0, 0, 0, 180});
         const float fn = dbNorm(t->volumeDb);
-        const float fy = faderBot - fn * (faderBot - faderTop);
-        c.fillRoundRect({faderX - 7.f, fy - 8.f, 20.f, 16.f}, 3.f, amber());
+        const float fy = faderBot - fn * faderH;
+        c.fillRoundRect({faderX + 3.f, fy, 8.f, std::max(0.f, faderBot - fy)}, 2.f, Color::argb(0xFF5C4318));
+        goldCap(c, faderX - 8.f, fy - 12.f, 30.f, 22.f);
         const char* marks[] = {"+6", "0", "-6", "-12", "-24", "-48"};
         const float markDb[] = {6, 0, -6, -12, -24, -48};
         for (int m = 0; m < 6; ++m) {
-            const float my = faderBot - dbNorm(markDb[m]) * (faderBot - faderTop);
-            c.drawText(marks[m], r.x + 6.f, my - 6.f, 11.f, dim(), false);
+            const float my = faderBot - dbNorm(markDb[m]) * faderH;
+            c.fillRect({faderX - 8.f, my, 6.f, 1.f}, dim());
+            c.drawText(marks[m], r.x + 6.f, my - 8.f, 12.f, dim(), false);
         }
-        drawStereo(c, f, t->id, {r.x + r.w - 36.f, faderTop, 22.f, faderBot - faderTop}, 0.4f);
-        pill(c, {r.x + 8.f, r.y + r.h - 28.f, 22.f, 18.f}, "M", t->mute);
-        pill(c, {r.x + 34.f, r.y + r.h - 28.f, 22.f, 18.f}, "S", t->solo);
-        pill(c, {r.x + 60.f, r.y + r.h - 28.f, 36.f, 18.f}, "Arm", t->arm);
+        drawStereo(c, f, t->id, {r.x + r.w - 40.f, faderTop, 28.f, faderH}, 0.55f);
+        const float bw = (r.w - 18.f) * 0.5f;
+        pill(c, {r.x + 6.f, r.y + r.h - 64.f, bw - 4.f, 24.f}, "S", t->solo);
+        pill(c, {r.x + 8.f + bw, r.y + r.h - 64.f, bw - 4.f, 24.f}, "C", false);
+        pill(c, {r.x + 6.f, r.y + r.h - 34.f, bw - 4.f, 24.f}, "Solo", t->solo);
+        pill(c, {r.x + 8.f + bw, r.y + r.h - 34.f, bw - 4.f, 24.f}, "Arm", t->arm);
+    }
+}
+
+void drawDeviceGraph(Canvas& c, Rect r, int kind) {
+    c.fillRoundRect(r, 6.f, Color::argb(0xFF100E0C));
+    c.innerShadow(r, 8.f, Color{0, 0, 0, 140});
+    const float mid = r.y + r.h * 0.5f;
+    if (kind == 0) {
+        float px = r.x + 8.f;
+        float py = mid;
+        for (int i = 1; i <= 64; ++i) {
+            const float t = static_cast<float>(i) / 64.f;
+            const float x = r.x + 8.f + t * (r.w - 16.f);
+            const float y = mid - std::sin(t * kPi * 6.f) * std::sin(t * kPi) * r.h * 0.36f;
+            c.line(px, py, x, y, amber(), 1.8f);
+            px = x;
+            py = y;
+        }
+    } else if (kind == 1) {
+        float px = r.x + 8.f;
+        float py = r.y + r.h - 16.f;
+        for (int i = 1; i <= 48; ++i) {
+            const float t = static_cast<float>(i) / 48.f;
+            const float x = r.x + 8.f + t * (r.w - 16.f);
+            const float bell = std::exp(-std::pow((t - 0.62f) * 7.f, 2.f));
+            const float y = r.y + r.h - 18.f - (0.15f + 0.7f * bell) * (r.h - 28.f);
+            c.line(px, py, x, y, orange(), 2.f);
+            px = x;
+            py = y;
+        }
+    } else {
+        c.line(r.x + 12.f, r.y + r.h - 16.f, r.x + r.w * 0.35f, r.y + r.h * 0.55f, orange(), 2.f);
+        c.line(r.x + r.w * 0.35f, r.y + r.h * 0.55f, r.x + r.w * 0.7f, r.y + r.h * 0.28f, orange(), 2.f);
+        c.line(r.x + r.w * 0.7f, r.y + r.h * 0.28f, r.x + r.w - 12.f, r.y + 16.f, orange(), 2.f);
+    }
+}
+
+void drawEnvelope(Canvas& c, Rect r) {
+    c.fillRoundRect(r, 4.f, Color::argb(0xFF100E0C));
+    const float x0 = r.x + 8.f;
+    const float base = r.y + r.h - 10.f;
+    const float peak = r.y + 12.f;
+    const float a = r.x + r.w * 0.22f;
+    const float d = r.x + r.w * 0.4f;
+    const float s = r.x + r.w * 0.72f;
+    const float sus = r.y + r.h * 0.42f;
+    c.line(x0, base, a, peak, orange(), 2.f);
+    c.line(a, peak, d, sus, orange(), 2.f);
+    c.line(d, sus, s, sus, orange(), 2.f);
+    c.line(s, sus, r.x + r.w - 8.f, base, orange(), 2.f);
+}
+
+void drawLfo(Canvas& c, Rect r) {
+    c.fillRoundRect(r, 4.f, Color::argb(0xFF100E0C));
+    const float mid = r.y + r.h * 0.5f;
+    float px = r.x + 6.f;
+    float py = mid;
+    const int n = 48;
+    for (int i = 1; i <= n; ++i) {
+        const float t = static_cast<float>(i) / n;
+        const float x = r.x + 6.f + t * (r.w - 12.f);
+        const float y = mid - std::sin(t * kPi * 4.f) * (r.h * 0.32f);
+        c.line(px, py, x, y, amber(), 1.8f);
+        px = x;
+        py = y;
     }
 }
 
@@ -624,27 +807,47 @@ void deviceChain(Canvas& c, const Frame& f) {
     const float w = static_cast<float>(c.width());
     const float h = static_cast<float>(c.height());
     const Track* chain = f.project ? f.project->findTrack("lead") : nullptr;
-    c.drawText("SYNTH LEAD", 24.f, kBarH + 16.f, 20.f, ink(), true);
+    c.drawText("SYNTH LEAD", 24.f, kBarH + 12.f, 22.f, ink(), true);
     if (!chain)
         return;
-    const float pw = std::min(420.f, (w - 40.f) / std::max<size_t>(1, chain->devices.size()) - 16.f);
+    const float side = 300.f;
+    const float top = kBarH + 52.f;
+    const float pw = (w - side - 48.f) / std::max<size_t>(1, chain->devices.size()) - 12.f;
     for (size_t i = 0; i < chain->devices.size(); ++i) {
         const auto& d = chain->devices[i];
-        Rect r{20.f + static_cast<float>(i) * (pw + 16.f), kBarH + 60.f, pw, h - kBarH - 90.f};
+        Rect r{20.f + static_cast<float>(i) * (pw + 12.f), top, pw, h - top - 24.f};
         panelBox(c, r, 10.f);
         c.fillRect({r.x, r.y, 5.f, r.h}, gold());
-        c.drawText(d.name, r.x + 18.f, r.y + 16.f, 22.f, ink(), true);
-        drawStereo(c, f, chain->id, {r.x + r.w - 40.f, r.y + 70.f, 24.f, r.h - 110.f}, 0.35f);
+        c.drawText(d.name, r.x + 18.f, r.y + 14.f, 22.f, ink(), true);
+        drawDeviceGraph(c, {r.x + 16.f, r.y + 52.f, r.w - 52.f, std::max(80.f, r.h - 340.f)}, static_cast<int>(i % 3));
+        drawStereo(c, f, chain->id, {r.x + r.w - 28.f, r.y + 52.f, 16.f, std::max(80.f, r.h - 340.f)}, 0.45f);
         int shown = 0;
         for (const auto& pr : d.params) {
-            if (shown >= 6)
+            if (shown >= 4)
                 break;
-            const float cxk = r.x + 48.f + static_cast<float>(shown % 3) * 90.f;
-            const float cyk = r.y + 120.f + static_cast<float>(shown / 3) * 110.f;
-            knob(c, cxk, cyk, knobNorm(pr.second), pr.first, "");
+            const float cxk = r.x + 56.f + static_cast<float>(shown % 2) * 120.f;
+            const float cyk = r.y + r.h - 210.f + static_cast<float>(shown / 2) * 110.f;
+            darkKnob(c, cxk, cyk, 48.f, knobNorm(pr.second), pr.first, paramText(pr.second));
             ++shown;
         }
+        if (i + 1 < chain->devices.size())
+            c.line(r.x + r.w, r.y + 40.f, r.x + r.w + 12.f, r.y + 40.f, gold(), 2.f);
     }
+    Rect mod{w - side - 8.f, top, side, h - top - 24.f};
+    panelBox(c, mod, 10.f);
+    c.fillRect({mod.x, mod.y, mod.w, 36.f}, Color::argb(0xFF1C1814));
+    c.drawText("MODULATION", mod.x + 16.f, mod.y + 8.f, 18.f, rod(), true);
+    c.drawText("LFO", mod.x + 16.f, mod.y + 48.f, 18.f, ink(), true);
+    drawLfo(c, {mod.x + 16.f, mod.y + 76.f, mod.w - 32.f, 64.f});
+    darkKnob(c, mod.x + 56.f, mod.y + 200.f, 48.f, 0.42f, "Rate", "1/8");
+    darkKnob(c, mod.x + 160.f, mod.y + 200.f, 48.f, 0.65f, "Depth", "65%");
+    c.drawText("ENVELOPE", mod.x + 16.f, mod.y + 280.f, 18.f, ink(), true);
+    drawEnvelope(c, {mod.x + 16.f, mod.y + 308.f, mod.w - 32.f, 72.f});
+    const char* env[] = {"A", "D", "S", "R"};
+    const float envV[] = {0.18f, 0.36f, 0.62f, 0.4f};
+    const char* envT[] = {"12", "180", "70", "240"};
+    for (int i = 0; i < 4; ++i)
+        darkKnob(c, mod.x + 40.f + i * 68.f, mod.y + 450.f, 44.f, envV[i], env[i], envT[i]);
 }
 
 void piano(Canvas& c, const Frame& f) {
@@ -667,45 +870,69 @@ void piano(Canvas& c, const Frame& f) {
                 clip = &t.clips.front();
         }
     }
-    const int rows = 24;
+    int pitchTop = 76;
+    int pitchBot = 60;
+    if (clip && !clip->notes.empty()) {
+        pitchTop = clip->notes.front().pitch;
+        pitchBot = pitchTop;
+        for (const auto& n : clip->notes) {
+            pitchTop = std::max(pitchTop, n.pitch);
+            pitchBot = std::min(pitchBot, n.pitch);
+        }
+    }
+    const int rows = 12;
+    if (pitchTop - pitchBot + 1 < rows)
+        pitchBot = pitchTop - rows + 1;
+    else
+        pitchTop = pitchBot + rows - 1;
     const float rowH = (h - top - velH) / rows;
+    const double origin = clip ? clip->startQ : 0.0;
+    const double spanQ = clip ? std::max(8.0, clip->lengthQ) : 32.0;
+    const float gridW = w - keyW - 16.f;
+    auto xAt = [&](double q) { return keyW + static_cast<float>((q - origin) / spanQ) * gridW; };
     static const char* names[] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
-    for (int bar = 0; bar < 16; ++bar) {
-        const float x = keyW + bar * 48.f;
+    const int bars = std::max(1, static_cast<int>(spanQ / 4.0));
+    for (int bar = 0; bar <= bars; ++bar) {
+        const float x = xAt(origin + bar * 4.0);
         c.drawText(std::to_string(bar + 1), x + 4.f, kBarH + 36.f, 18.f, dim(), false);
         c.line(x, top, x, h - velH, line(), bar % 4 == 0 ? 1.4f : 1.f);
     }
-    const double head = f.engine ? f.engine->playhead() : (f.project ? f.project->playhead : 8);
-    const float hx = keyW + static_cast<float>(head) * 12.f;
+    const double head = f.engine ? f.engine->playhead() : (f.project ? f.project->playhead : origin);
+    const float hx = xAt(head);
     for (int p = 0; p < rows; ++p) {
-        const int pitch = 72 - p;
+        const int pitch = pitchTop - p;
         const float y = top + p * rowH;
-        const int pc = pitch % 12;
+        const int pc = ((pitch % 12) + 12) % 12;
         const bool black = pc == 1 || pc == 3 || pc == 6 || pc == 8 || pc == 10;
         c.fillRect({0, y, keyW, rowH - 1.f}, black ? Color::argb(0xFF1A1614) : Color::argb(0xFFD1BCAC));
         c.fillRect({keyW, y, w - keyW, rowH - 1.f}, black ? Color::argb(0xFF100E0C) : Color::argb(0xFF161311));
-        char label[8];
-        std::snprintf(label, sizeof(label), "%s%d", names[pc], pitch / 12 - 1);
-        c.drawText(label, 6.f, y + 1.f, 18.f, black ? Color::argb(0xFFD1BCAC) : Color::argb(0xFF1A120C), true);
-        if (clip) {
-            for (const auto& n : clip->notes) {
-                if (n.pitch != pitch)
-                    continue;
-                const float x = keyW + 8.f + static_cast<float>(n.startQ) * 28.f;
-                const float nw = std::max(8.f, static_cast<float>(n.lengthQ) * 28.f);
-                c.fillRoundRect({x, y + 2.f, nw, rowH - 4.f}, 3.f, gold());
-            }
+        if (rowH >= 22.f || pc == 0) {
+            char label[16];
+            std::snprintf(label, sizeof(label), "%s%d", names[pc], pitch / 12 - 1);
+            c.drawText(label, 6.f, y + std::max(0.f, (rowH - 20.f) * 0.5f), 18.f, black ? Color::argb(0xFFD1BCAC) : Color::argb(0xFF1A120C), true);
+        }
+        if (!clip)
+            continue;
+        for (const auto& n : clip->notes) {
+            if (n.pitch != pitch)
+                continue;
+            const float x = xAt(origin + n.startQ);
+            const float nw = std::max(10.f, static_cast<float>(n.lengthQ / spanQ) * gridW);
+            Rect note{x, y + 3.f, nw, std::max(8.f, rowH - 6.f)};
+            c.fillRoundRect(note, 3.f, gold());
+            c.fillRect({note.x, note.y, 3.f, note.h}, amber());
         }
     }
     c.line(hx, top, hx, h - velH, rod(), 1.6f);
-    c.fillRoundRect({hx - 16.f, top - 16.f, 40.f, 16.f}, 3.f, gold());
+    c.fillEllipse(hx - 6.f, top - 6.f, 12.f, 12.f, gold());
     c.fillRect({0, h - velH, w, velH}, Color::argb(0xFF0E0C0B));
     c.drawText("Velocity", 8.f, h - velH + 8.f, 18.f, dim(), true);
     if (clip) {
         for (const auto& n : clip->notes) {
-            const float x = keyW + 8.f + static_cast<float>(n.startQ) * 28.f;
-            const float vh = std::max(4.f, n.velocity * (velH - 28.f));
-            c.fillRect({x, h - 8.f - vh, 10.f, vh}, amber());
+            const float x = xAt(origin + n.startQ);
+            const float nw = std::max(8.f, static_cast<float>(n.lengthQ / spanQ) * gridW * 0.45f);
+            const float vh = std::max(6.f, n.velocity * (velH - 28.f));
+            c.fillRect({x, h - 8.f - vh, nw, vh}, amber());
         }
     }
 }
@@ -716,8 +943,10 @@ void browser(Canvas& c, const Frame& f) {
     browserColumn(c, f, h);
     Rect search{176.f, kBarH + 10.f, 420.f, 32.f};
     c.fillRoundRect(search, 6.f, Color::argb(0xFF161311));
+    c.innerShadow(search, 4.f, Color{0, 0, 0, 120});
     c.strokeRect(search, line(), 1.f);
-    c.drawText(f.search.empty() ? "Search" : f.search, search.x + 12.f, search.y + 6.f, 18.f,
+    glyphIcon(c, 5, search.x + 8.f, search.y + 6.f, dim());
+    c.drawText(f.search.empty() ? "Search" : f.search, search.x + 32.f, search.y + 6.f, 18.f,
                f.search.empty() ? dim() : ink(), false);
     c.drawText("Name", 180.f, kBarH + 52.f, 18.f, dim(), true);
     c.drawText("Tags", 520.f, kBarH + 52.f, 18.f, dim(), true);
@@ -733,7 +962,7 @@ void browser(Canvas& c, const Frame& f) {
         c.fillRoundRect({520.f, r.y + 8.f, 64.f, 26.f}, 8.f, Color::argb(0xFF2A2118));
         c.drawText(tags[i], 528.f, r.y + 10.f, 18.f, rod(), true);
         c.drawText(durs[i], 760.f, r.y + 10.f, 18.f, dim(), false);
-        c.fillEllipse(r.x + r.w - 28.f, r.y + 22.f, 6.f, 6.f, i < 2 ? gold() : Color::argb(0xFF3C3732));
+        glyphIcon(c, 6, r.x + r.w - 36.f, r.y + 12.f, i < 2 ? gold() : Color::argb(0xFF3C3732));
     }
     Rect preview{w - 320.f, kBarH + 80.f, 300.f, 220.f};
     panelBox(c, preview, 8.f);
@@ -748,22 +977,90 @@ void browser(Canvas& c, const Frame& f) {
     for (int i = 0; i < 3; ++i) {
         Rect tile{preview.x + i * 100.f, preview.y + 268.f, 92.f, 64.f};
         c.fillRoundRect(tile, 6.f, Color::argb(0xFF161311));
+        c.innerShadow(tile, 4.f, Color{0, 0, 0, 100});
         c.drawText(items[i], tile.x + 8.f, tile.y + 20.f, 18.f, ink(), false);
+    }
+    c.drawText("Collections", 180.f, kBarH + 410.f, 18.f, dim(), true);
+    const char* cols[] = {"Drums", "Bass", "Leads", "Vocals", "FX", "House"};
+    for (int i = 0; i < 6; ++i) {
+        Rect tile{176.f + (i % 6) * 150.f, kBarH + 444.f, 140.f, 120.f};
+        c.dropShadow(tile, 6.f, 6.f, Color{0, 0, 0, 120});
+        c.fillRoundRect(tile, 8.f, Color::argb(0xFF161311));
+        c.innerShadow(tile, 8.f, Color{0, 0, 0, 110});
+        c.fillRect({tile.x, tile.y, tile.w, 6.f}, i % 2 ? amber() : gold());
+        for (int k = 0; k < 16; ++k) {
+            const float amp = 8.f + 18.f * std::fabs(std::sin((k + i) * 0.7f));
+            c.fillRect({tile.x + 12.f + k * 7.f, tile.y + 58.f - amp, 4.f, amp * 2.f}, amber());
+        }
+        c.drawText(cols[i], tile.x + 12.f, tile.y + 88.f, 18.f, ink(), true);
     }
 }
 
 void pluginWindow(Canvas& c, const Frame& f) {
     const float w = static_cast<float>(c.width());
     const float h = static_cast<float>(c.height());
-    panelBox(c, {80.f, 90.f, w - 160.f, h - 160.f}, 10.f);
-    c.drawText(f.pluginLoaded ? "GHOVLZ Test Gain" : "Plugin", 108.f, 112.f, 26.f, ink(), true);
-    c.drawText(f.pluginLoaded ? "Generic editor" : "No plugin loaded", 108.f, 148.f, 14.f, dim(), false);
-    c.fillRect({108.f, 176.f, w - 220.f, 1.f}, gold());
-    const float norm = f.pluginGain;
-    knob(c, w * 0.5f, h * 0.48f, norm, "Gain", "");
-    char v[16];
-    std::snprintf(v, sizeof(v), "%.2f", norm);
-    c.drawText(v, w * 0.5f - 18.f, h * 0.48f + 78.f, 18.f, rod(), true);
+    c.drawText("GHOVLZ! DAW", 36.f, kBarH + 8.f, 28.f, gold(), true);
+    c.drawText("Visual language", 36.f, kBarH + 42.f, 18.f, dim(), false);
+    Rect palette{28.f, kBarH + 70.f, w - 56.f, 168.f};
+    panelBox(c, palette, 10.f);
+    c.drawText("Palette", palette.x + 16.f, palette.y + 10.f, 18.f, ink(), true);
+    const uint32_t swatches[] = {0x0A0A0A, 0x161311, 0x3C3732, 0xB49637, 0xF5F5F5, 0xDAA520,
+                                 0xFF821E, 0x231F20, 0xD1BCAC, 0xFF6E00, 0x14120E, 0xDC2828};
+    const char* names[] = {"Background", "Panel", "Line", "Gold", "Text", "Goldenrod",
+                           "Amber", "Knob", "Pointer", "Arc", "Meter", "Clip"};
+    const char* hexes[] = {"#0A0A0A", "#161311", "#3C3732", "#B49637", "#F5F5F5", "#DAA520",
+                           "#FF821E", "#231F20", "#D1BCAC", "#FF6E00", "#14120E", "#DC2828"};
+    for (int i = 0; i < 12; ++i) {
+        const float x = palette.x + 16.f + i * 132.f;
+        c.fillRoundRect({x, palette.y + 40.f, 112.f, 48.f}, 4.f, Color::argb(0xFF000000u | swatches[i]));
+        c.strokeRect({x, palette.y + 40.f, 112.f, 48.f}, line(), 1.f);
+        c.drawText(hexes[i], x, palette.y + 94.f, 14.f, dim(), false);
+        c.drawText(names[i], x, palette.y + 112.f, 14.f, ink(), false);
+    }
+    Rect type{28.f, kBarH + 254.f, 460.f, 340.f};
+    panelBox(c, type, 10.f);
+    c.drawText("Type specimen", type.x + 16.f, type.y + 12.f, 18.f, ink(), true);
+    c.drawText("GHOVLZ! DAW", type.x + 16.f, type.y + 48.f, 32.f, gold(), true);
+    c.drawText("Display", type.x + 16.f, type.y + 100.f, 18.f, dim(), false);
+    c.drawText("Heading", type.x + 16.f, type.y + 128.f, 22.f, ink(), true);
+    c.drawText("Label", type.x + 16.f, type.y + 160.f, 18.f, ink(), false);
+    c.drawText("Value", type.x + 16.f, type.y + 188.f, 18.f, rod(), true);
+    c.drawText("Tempo", type.x + 220.f, type.y + 110.f, 18.f, dim(), false);
+    c.drawText("128.00 BPM", type.x + 220.f, type.y + 140.f, 28.f, ink(), true);
+    Rect knobs{504.f, kBarH + 254.f, 620.f, 340.f};
+    panelBox(c, knobs, 10.f);
+    c.drawText("DarkKnob", knobs.x + 16.f, knobs.y + 12.f, 18.f, ink(), true);
+    const char* states[] = {"Default", "Hover", "Active", "Modulated"};
+    const float norms[] = {0.5f, 0.62f, 0.84f, f.pluginGain};
+    for (int i = 0; i < 4; ++i)
+        darkKnob(c, knobs.x + 80.f + i * 150.f, knobs.y + 150.f, 64.f, norms[i], states[i], "");
+    Rect meter{1140.f, kBarH + 254.f, w - 1168.f, 340.f};
+    panelBox(c, meter, 10.f);
+    c.drawText("Meter and fader", meter.x + 16.f, meter.y + 12.f, 18.f, ink(), true);
+    drawStereo(c, f, "lead", {meter.x + 36.f, meter.y + 48.f, 36.f, 150.f}, 0.72f);
+    c.drawText("Meter", meter.x + 28.f, meter.y + 206.f, 18.f, dim(), false);
+    Rect well{meter.x + 120.f, meter.y + 48.f, 16.f, 150.f};
+    c.fillRoundRect(well, 4.f, Color::argb(0xFF1A1614));
+    c.innerShadow(well, 4.f, Color{0, 0, 0, 160});
+    goldCap(c, well.x - 10.f, well.y + 48.f, 36.f, 22.f);
+    c.drawText("Fader", meter.x + 110.f, meter.y + 206.f, 18.f, dim(), false);
+    Rect buttons{28.f, kBarH + 610.f, w - 56.f, h - kBarH - 626.f};
+    panelBox(c, buttons, 10.f);
+    c.drawText("Buttons and toggles", buttons.x + 16.f, buttons.y + 12.f, 18.f, ink(), true);
+    const float by = buttons.y + buttons.h * 0.42f;
+    pill(c, {buttons.x + 220.f, by, 120.f, 36.f}, "Button", false);
+    pill(c, {buttons.x + 360.f, by, 120.f, 36.f}, "Active", true);
+    transportButton(c, {buttons.x + 540.f, by - 2.f, 40.f, 40.f}, true);
+    playGlyph(c, buttons.x + 552.f, by + 8.f, 18.f, rod());
+    transportButton(c, {buttons.x + 592.f, by - 2.f, 40.f, 40.f}, false);
+    c.fillRoundRect({buttons.x + 604.f, by + 10.f, 16.f, 16.f}, 2.f, ink());
+    transportButton(c, {buttons.x + 644.f, by - 2.f, 40.f, 40.f}, false);
+    c.fillEllipse(buttons.x + 664.f, by + 18.f, 8.f, 8.f, Color::argb(0xFFDC2828));
+    pill(c, {buttons.x + 740.f, by + 4.f, 40.f, 28.f}, "S", true);
+    pill(c, {buttons.x + 792.f, by + 4.f, 64.f, 28.f}, "Arm", true);
+    c.fillRoundRect({buttons.x + 920.f, by + 6.f, 64.f, 28.f}, 14.f, gold());
+    c.fillEllipse(buttons.x + 960.f, by + 20.f, 10.f, 10.f, Color::argb(0xFF1A120C));
+    c.drawText("Toggle", buttons.x + 996.f, by + 8.f, 18.f, ink(), false);
 }
 
 } // namespace

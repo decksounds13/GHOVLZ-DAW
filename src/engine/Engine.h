@@ -102,21 +102,27 @@ private:
 
     Graph* acquire() const;
     void releaseGraph() const;
-    bool graphPinned(Graph* graph) const;
+    bool graphPinned(std::uintptr_t stamp) const;
+    static std::uintptr_t packGraph(Graph* graph, uint32_t seq);
+    static Graph* unpackGraph(std::uintptr_t stamp);
 
     std::shared_ptr<Project> project_;
-    mutable std::atomic<Graph*> published_ {nullptr};
+    // High 16 bits are a publish sequence. Reusing a graph address must not
+    // look like the pointer a reader already loaded.
+    mutable std::atomic<std::uintptr_t> published_ {0};
+    uint32_t publishSeq_ = 1;
     mutable std::atomic<int> readers_ {0};
-    // Hazard slots. A reader stores the graph it is using here before touching it.
-    // publish() will not destroy a graph while any slot still names it.
+    // Hazard slots. A reader stores the stamped graph it is using here before touching it.
+    // publish() will not destroy a graph while any slot still names that stamp.
     struct Hazard {
-        std::atomic<Graph*> ptr {nullptr};
+        std::atomic<std::uintptr_t> ptr {0};
     };
     mutable Hazard hazards_[8];
-    static Graph* const kClaimed;
+    static constexpr std::uintptr_t kClaimed = 1;
     struct PinState {
         Hazard* slot = nullptr;
         Graph* held = nullptr;
+        std::uintptr_t stamp = 0;
         int depth = 0;
     };
     static PinState& pinState();

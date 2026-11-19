@@ -395,7 +395,7 @@ TEST_CASE("paint scale matches the 100 percent hit targets") {
     REQUIRE(scaled[0] == 255);
 }
 
-TEST_CASE("arrangement clips stay inside their lane") {
+TEST_CASE("arrangement clips and automation stay inside their lane") {
     Project project = Project::makeShowcase();
     auto canvas = makeSoftwareCanvas(1680, 980);
     Frame frame;
@@ -403,18 +403,48 @@ TEST_CASE("arrangement clips stay inside their lane") {
     frame.view = View::Arrangement;
     paintFrame(*canvas, frame);
     const uint8_t* px = softwarePixels(*canvas);
-    int hits = 0;
-    for (int y = 0; y < 980; ++y) {
-        for (int x = 344; x < 1500; x += 4) {
+    const float headerX = 156.f;
+    const float laneX = headerX + 160.f;
+    const float laneR = 1680.f - 86.f;
+    const float rowsTop = 54.f + 40.f;
+    const float rowsBot = 980.f - 176.f;
+    int rows = 1;
+    int lead = -1;
+    int pads = -1;
+    int index = 0;
+    for (const auto& t : project.tracks) {
+        if (t.type == TrackType::Return)
+            continue;
+        if (t.id == "lead")
+            lead = index;
+        if (t.id == "pads")
+            pads = index;
+        ++index;
+        ++rows;
+    }
+    REQUIRE(lead >= 0);
+    REQUIRE(pads == lead + 1);
+    const float rowH = (rowsBot - rowsTop) / static_cast<float>(rows);
+    auto inLane = [&](int y, int lane) {
+        const float top = rowsTop + static_cast<float>(lane) * rowH;
+        return y >= static_cast<int>(top) && y < static_cast<int>(top + rowH);
+    };
+    int amber = 0;
+    int body = 0;
+    const int kickY = static_cast<int>(rowsTop + rowH * 0.55f);
+    for (int y = static_cast<int>(rowsTop); y < static_cast<int>(rowsBot); ++y) {
+        for (int x = static_cast<int>(laneX); x < static_cast<int>(laneR); x += 2) {
             const uint8_t* p = px + (y * 1680 + x) * 4;
-            if (p[0] == 0x1A && p[1] == 0x14 && p[2] == 0x10) {
-                REQUIRE(y >= 94);
-                REQUIRE(y < 980 - 176);
-                ++hits;
+            if (p[0] == 0xFF && p[1] == 0x82 && p[2] == 0x1E) {
+                REQUIRE((inLane(y, lead) || inLane(y, pads)));
+                ++amber;
             }
+            if (y == kickY && x > laneX + 30 && x < laneX + 200 && p[0] > 70)
+                ++body;
         }
     }
-    REQUIRE(hits > 20);
+    REQUIRE(amber > 20);
+    REQUIRE(body > 10);
 }
 
 TEST_CASE("moduleinfo is scanned without loading and a hang is blacklisted") {

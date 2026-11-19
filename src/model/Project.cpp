@@ -427,8 +427,9 @@ Project Project::makeShowcase() {
     fx->clips.push_back(audioClip("c-fx", "Riser", 56, 8, "riser", 0xFFFF6E00));
     Clip leadClip;
     leadClip.id = "c-lead"; leadClip.name = "Lead"; leadClip.startQ = 64; leadClip.lengthQ = 32; leadClip.color = 0xFFDAA520;
-    const int pitches[] = {64, 67, 71, 74, 72, 67, 69, 64};
-    for (int i = 0; i < 16; ++i) leadClip.notes.push_back(Note{i * 2.0, 1.5, pitches[i % 8], 0.85f});
+    const int pitches[] = {60, 64, 67, 71, 69, 67, 65, 64, 62, 67, 71, 70, 69, 67, 64, 60};
+    for (int i = 0; i < 16; ++i)
+        leadClip.notes.push_back(Note{i * 2.0, 1.6, pitches[i], 0.45f + 0.5f * static_cast<float>((i * 5) % 7) / 6.f});
     lead->clips.push_back(leadClip);
     Clip padClip;
     padClip.id = "c-pad"; padClip.name = "Pad Chords"; padClip.startQ = 32; padClip.lengthQ = 64; padClip.color = 0xFFB49637;
