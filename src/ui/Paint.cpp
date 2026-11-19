@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <initializer_list>
 #include <string>
 #include <vector>
 
@@ -188,6 +189,31 @@ void darkKnob(Canvas& c, float cx, float cy, float diameter, float norm, const s
 
 void knob(Canvas& c, float cx, float cy, float norm, const std::string& label, const std::string& value) {
     darkKnob(c, cx, cy, 48.f, norm, label, value);
+}
+
+// Device-chain knob. The disc is #231F20, the pointer is #D1BCAC, the arc is #FF6E00.
+// `diameter` is the disc, sized from the card rather than a fixed pixel size.
+void chainKnob(Canvas& c, float cx, float cy, float diameter, float norm, const std::string& label) {
+    norm = std::clamp(norm, 0.f, 1.f);
+    const float rad = diameter * 0.5f;
+    const float rim = std::max(2.f, diameter * 0.035f);
+    c.dropShadow({cx - rad, cy - rad + 3.f, diameter, diameter}, rad, std::max(6.f, diameter * 0.08f), Color{0, 0, 0, 170});
+    c.fillEllipse(cx, cy + rim * 0.4f, rad + rim, rad + rim, Color::argb(0xFF3A342E));
+    c.fillEllipse(cx, cy - rim * 0.35f, rad + rim * 0.55f, rad + rim * 0.55f, Color::argb(0xFF5A5048));
+    c.fillEllipse(cx, cy, rad, rad, Color::argb(0xFF231F20));
+    c.innerShadow({cx - rad, cy - rad, diameter, diameter}, std::max(4.f, diameter * 0.1f), Color{0, 0, 0, 170});
+    const float a0 = -kPi * 0.5f - 145.f * kPi / 180.f;
+    const float a1 = -kPi * 0.5f + 145.f * kPi / 180.f;
+    const float arcR = rad + rim * 0.15f;
+    const float thick = std::max(2.4f, diameter * 0.045f);
+    c.arc(cx, cy, arcR, a0, a1, Color::argb(0xFF3C3732), thick);
+    c.arc(cx, cy, arcR, a0, a0 + (a1 - a0) * norm, Color::argb(0xFFFF6E00), thick + 0.6f);
+    const float ang = a0 + (a1 - a0) * norm;
+    const float pointer = std::max(2.f, diameter * 0.045f);
+    c.line(cx + std::cos(ang) * rad * 0.18f, cy + std::sin(ang) * rad * 0.18f,
+           cx + std::cos(ang) * rad * 0.78f, cy + std::sin(ang) * rad * 0.78f, Color::argb(0xFFD1BCAC), pointer);
+    if (!label.empty())
+        centered(c, label, cx, cy + rad + 6.f, 18.f, dim(), false);
 }
 
 void goldCap(Canvas& c, float x, float y, float w, float h) {
@@ -854,79 +880,115 @@ void drawLfo(Canvas& c, Rect r) {
 }
 
 std::string shortParam(const std::string& id) {
-    if (id == "position") return "Pos";
-    if (id == "cutoff") return "Cut";
-    if (id == "resonance" || id == "reso") return "Res";
-    if (id == "unison") return "Uni";
+    if (id == "position") return "Position";
+    if (id == "cutoff") return "Cutoff";
+    if (id == "resonance" || id == "reso") return "Reso";
+    if (id == "unison") return "Unison";
     if (id == "wave") return "Wave";
-    return id.size() > 5 ? id.substr(0, 5) : id;
+    if (id == "drive") return "Drive";
+    if (id == "mix") return "Mix";
+    if (id == "tone") return "Tone";
+    if (id == "out") return "Out";
+    return id.size() > 8 ? id.substr(0, 8) : id;
+}
+
+void chainCard(Canvas& c, Rect r) {
+    c.dropShadow(r, 8.f, 10.f, Color{0, 0, 0, 160});
+    c.fillRoundRect(r, 8.f, Color::argb(0xFF16120F));
+    c.innerShadow(r, 10.f, Color{0, 0, 0, 160});
+    c.strokeRect(r, Color::argb(0xFF3C3732), 1.2f);
+    c.line(r.x + 12.f, r.y + 1.5f, r.x + r.w - 12.f, r.y + 1.5f, Color::argb(0xFF6A5430), 1.4f);
 }
 
 void drawChainDisplay(Canvas& c, Rect r, const std::string& type) {
     c.fillRoundRect(r, 4.f, Color::argb(0xFF100E0C));
     c.innerShadow(r, 5.f, Color{0, 0, 0, 140});
-    const float mid = r.y + r.h * 0.55f;
+    c.clip(r);
+    const float mid = r.y + r.h * 0.5f;
+    const Color glow{255, 140, 40, 80};
+    const Color fill{218, 165, 32, 110};
+    auto column = [&](float x, float yTop, Color color) {
+        const float y0 = std::clamp(yTop, r.y + 4.f, r.y + r.h - 6.f);
+        c.fillRect({x, y0, 1.f, r.y + r.h - 6.f - y0}, color);
+    };
     if (type == "eq") {
-        float px = r.x + 8.f;
-        float py = mid + 10.f;
-        const float nodeT[] = {0.16f, 0.48f, 0.78f};
-        const float nodeY[] = {8.f, -r.h * 0.28f, 4.f};
-        for (int i = 1; i <= 40; ++i) {
-            const float t = static_cast<float>(i) / 40.f;
-            const float x = r.x + 8.f + t * (r.w - 16.f);
-            const float bell = std::exp(-std::pow((t - 0.48f) * 5.5f, 2.f));
-            const float shelf = t < 0.22f ? 8.f : (t > 0.72f ? 4.f : 0.f);
-            const float y = mid + shelf - bell * r.h * 0.32f;
-            c.line(px, py, x, y, amber(), 2.f);
-            px = x;
-            py = y;
+        const int cols = std::max(8, static_cast<int>(r.w) - 20);
+        auto yAt = [&](float t) {
+            const float bell = std::exp(-std::pow((t - 0.55f) * 4.4f, 2.f));
+            return r.y + r.h * 0.80f - bell * r.h * 0.58f;
+        };
+        for (int i = 0; i < cols; ++i) {
+            const float t = static_cast<float>(i) / static_cast<float>(cols);
+            const float x = r.x + 10.f + static_cast<float>(i);
+            const float y = yAt(t);
+            column(x, y - 3.f, glow);
+            column(x, y, fill);
         }
-        for (int n = 0; n < 3; ++n) {
-            const float x = r.x + 8.f + nodeT[n] * (r.w - 16.f);
-            const float y = mid + nodeY[n];
-            c.fillEllipse(x, y, 7.f, 7.f, rod());
-            c.fillEllipse(x, y, 4.5f, 4.5f, gold());
+        const Color grid{90, 78, 62, 150};
+        for (int i = 1; i < 4; ++i) {
+            const float y = r.y + r.h * static_cast<float>(i) / 4.f;
+            const float x = r.x + r.w * static_cast<float>(i) / 4.f;
+            c.line(r.x + 8.f, y, r.x + r.w - 8.f, y, grid, 1.f);
+            c.line(x, r.y + 8.f, x, r.y + r.h - 8.f, grid, 1.f);
         }
+        float prevX = r.x + 10.f;
+        float prevY = yAt(0.f);
+        for (int i = 1; i < cols; ++i) {
+            const float t = static_cast<float>(i) / static_cast<float>(cols);
+            const float x = r.x + 10.f + static_cast<float>(i);
+            const float y = yAt(t);
+            c.line(prevX, prevY, x, y, Color::argb(0xFFFFC56A), 2.2f);
+            prevX = x;
+            prevY = y;
+        }
+        const float nodeT[] = {0.14f, 0.55f, 0.84f};
+        for (float t : nodeT) {
+            const float x = r.x + 10.f + t * static_cast<float>(cols);
+            const float y = yAt(t);
+            c.fillRoundRect({x - 5.f, y - 5.f, 10.f, 10.f}, 2.f, Color::argb(0xFF1A120C));
+            c.fillRoundRect({x - 3.f, y - 3.f, 6.f, 6.f}, 1.f, Color::argb(0xFFFFE0A0));
+        }
+        c.resetClip();
         return;
     }
     if (type == "filter") {
-        float px = r.x + 8.f;
-        float py = r.y + 12.f;
-        for (int i = 1; i <= 32; ++i) {
-            const float t = static_cast<float>(i) / 32.f;
-            const float x = r.x + 8.f + t * (r.w - 16.f);
-            const float fall = t < 0.62f ? 0.f : (t - 0.62f) * (t - 0.62f) * 220.f;
-            const float y = std::min(r.y + r.h - 8.f, r.y + 14.f + fall);
-            c.line(px, py, x, y, amber(), 2.f);
-            px = x;
-            py = y;
+        const int cols = std::max(8, static_cast<int>(r.w) - 16);
+        auto yAt = [&](float t) {
+            const float bump = std::exp(-std::pow((t - 0.58f) * 9.f, 2.f));
+            const float fall = t < 0.48f ? 0.f : std::pow(t - 0.48f, 1.6f) * 1.7f;
+            return std::clamp(r.y + r.h * (0.22f + fall) - bump * r.h * 0.34f, r.y + 6.f, r.y + r.h - 8.f);
+        };
+        for (int i = 0; i < cols; ++i) {
+            const float t = static_cast<float>(i) / static_cast<float>(cols);
+            const float x = r.x + 8.f + static_cast<float>(i);
+            const float y = yAt(t);
+            column(x, y - 3.f, glow);
+            column(x, y, fill);
         }
+        float prevX = r.x + 8.f;
+        float prevY = yAt(0.f);
+        for (int i = 1; i < cols; ++i) {
+            const float t = static_cast<float>(i) / static_cast<float>(cols);
+            const float x = r.x + 8.f + static_cast<float>(i);
+            const float y = yAt(t);
+            c.line(prevX, prevY, x, y, Color::argb(0xFFFFC56A), 2.2f);
+            prevX = x;
+            prevY = y;
+        }
+        c.resetClip();
         return;
     }
-    if (type == "saturator" || type == "compressor" || type == "dyn") {
-        float px = r.x + 8.f;
-        float py = r.y + r.h - 10.f;
-        for (int i = 1; i <= 24; ++i) {
-            const float t = static_cast<float>(i) / 24.f;
-            const float x = r.x + 8.f + t * (r.w - 16.f);
-            const float shaped = std::tanh(t * 2.2f) / std::tanh(2.2f);
-            const float y = r.y + r.h - 10.f - shaped * (r.h - 20.f);
-            c.line(px, py, x, y, amber(), 2.f);
-            px = x;
-            py = y;
-        }
-        return;
+    const int cols = std::max(8, static_cast<int>(r.w) - 16);
+    for (int i = 0; i < cols; ++i) {
+        const float t = static_cast<float>(i) / static_cast<float>(std::max(1, cols - 1));
+        const float lobe = std::fabs(std::sin(t * 96.f)) * (0.25f + 0.75f * std::fabs(std::sin(t * 23.f + 0.6f)));
+        const float flutter = 0.55f + 0.45f * std::fabs(std::sin(t * 7.f));
+        const float hgt = 2.f + lobe * flutter * r.h * 0.40f;
+        const float x = r.x + 8.f + static_cast<float>(i);
+        c.fillRect({x, mid - hgt - 2.f, 1.f, hgt * 2.f + 4.f}, glow);
+        c.fillRect({x, mid - hgt, 1.f, hgt * 2.f}, Color::argb(0xFFE8B15A));
     }
-    float px = r.x + 6.f;
-    float py = mid;
-    for (int i = 1; i <= 36; ++i) {
-        const float t = static_cast<float>(i) / 36.f;
-        const float x = r.x + 6.f + t * (r.w - 12.f);
-        const float y = mid - std::sin(t * kPi * 3.f) * (r.h * 0.32f);
-        c.line(px, py, x, y, amber(), 2.f);
-        px = x;
-        py = y;
-    }
+    c.resetClip();
 }
 
 void goldJoin(Canvas& c, float x0, float x1, float y) {
@@ -944,61 +1006,74 @@ void deviceChain(Canvas& c, const Frame& f) {
     const Track* chain = f.project ? f.project->findTrack("lead") : nullptr;
     Rect box{16.f, kBarH + 12.f, w - 32.f, std::max(240.f, h - kBarH - 24.f)};
     panelBox(c, box, 10.f);
-    c.drawText(chain ? chain->name.c_str() : "Lead", box.x + 16.f, box.y + 12.f, 18.f, ink(), true);
+    c.drawText(chain ? chain->name.c_str() : "Lead", box.x + 16.f, box.y + 10.f, 22.f, ink(), true);
     if (!chain)
         return;
-    const float sideW = 200.f;
-    const float gap = 28.f;
-    // Cards keep the concept's ratio: the display is about 38% of the card,
-    // and a 48 px knob with its 18 px caption sits in the middle of the rest.
-    const float cardH = box.h - 56.f;
-    const float top = box.y + 42.f;
-    c.fillRect({box.x + box.w - sideW - 8.f, top, 1.f, cardH}, line());
+    const float sideW = 176.f;
+    const float gap = 34.f;
+    const float top = box.y + 44.f;
     const int n = static_cast<int>(chain->devices.size());
-    const float cardsW = box.w - sideW - 36.f;
-    const float cardW = n > 0 ? (cardsW - gap * static_cast<float>(std::max(0, n - 1))) / static_cast<float>(n) : 200.f;
-    const float knobD = 48.f;
+    const float cardsW = box.w - sideW - 40.f;
+    const float cardW = n > 0 ? (cardsW - gap * static_cast<float>(std::max(0, n - 1))) / static_cast<float>(n) : 220.f;
+    // About as tall as they are wide, and never stretched down the lane.
+    const float cardH = std::min(cardW * 1.1f, box.h - 64.f);
     const float titleH = 36.f;
-    const float dispH = cardH * 0.38f;
-    const float labelBlock = 44.f;
-    const float wellTop = titleH + dispH;
-    const float wellH = cardH - wellTop - 8.f;
-    const float knobCy = wellTop + (wellH - (knobD + labelBlock)) * 0.5f + knobD * 0.5f;
-    const float joinY = top + titleH + dispH * 0.5f;
+    const float labelH = 26.f;
+    const float lower = cardH * 0.50f;
+    const float knobD = std::min(cardW * 0.40f, lower - labelH - 8.f);
+    const float dispTop = titleH;
+    const float dispH = std::max(56.f, cardH - titleH - (knobD + labelH) - 18.f);
+    const float knobCy = cardH - 12.f - labelH - knobD * 0.5f;
+    const float joinY = top + dispTop + dispH * 0.5f;
+    auto take = [](const DeviceState& d, std::initializer_list<const char*> prefer, int limit) {
+        std::vector<std::pair<std::string, float>> out;
+        for (const char* id : prefer) {
+            const auto it = d.params.find(id);
+            if (it == d.params.end())
+                continue;
+            out.push_back(*it);
+            if (static_cast<int>(out.size()) >= limit)
+                return out;
+        }
+        for (const auto& pr : d.params) {
+            bool have = false;
+            for (const auto& got : out)
+                have = have || got.first == pr.first;
+            if (have)
+                continue;
+            out.push_back(pr);
+            if (static_cast<int>(out.size()) >= limit)
+                break;
+        }
+        return out;
+    };
     for (int i = 0; i < n; ++i) {
         const auto& d = chain->devices[static_cast<size_t>(i)];
-        Rect r{box.x + 14.f + static_cast<float>(i) * (cardW + gap), top, cardW, cardH};
-        if (r.x + r.w > box.x + box.w - sideW - 12.f)
+        Rect r{box.x + 16.f + static_cast<float>(i) * (cardW + gap), top, cardW, cardH};
+        if (r.x + r.w > box.x + box.w - sideW - 16.f)
             break;
-        panelBox(c, r, 8.f);
-        centered(c, d.name, r.x + r.w * 0.5f, r.y + 10.f, 18.f, ink(), true);
+        chainCard(c, r);
+        centered(c, d.name, r.x + r.w * 0.5f, r.y + 8.f, 22.f, ink(), true);
         const bool graph = d.type == "eq";
         const bool knobsOnly = d.type == "saturator" || d.type == "compressor" || d.type == "dyn";
-        if (!knobsOnly) {
-            const float eqH = std::min(cardH - titleH - 12.f, knobCy + knobD * 0.5f + labelBlock - titleH);
-            drawChainDisplay(c, {r.x + 12.f, r.y + titleH, r.w - 24.f, graph ? eqH : dispH}, d.type);
-        }
+        if (graph)
+            drawChainDisplay(c, {r.x + 12.f, r.y + titleH, r.w - 24.f, cardH - titleH - 14.f}, d.type);
+        else if (!knobsOnly)
+            drawChainDisplay(c, {r.x + 12.f, r.y + dispTop, r.w - 24.f, dispH}, d.type);
         if (!graph) {
-            std::vector<std::pair<std::string, float>> knobs;
-            const int limit = knobsOnly ? 4 : 2;
-            for (const auto& pr : d.params) {
-                if (static_cast<int>(knobs.size()) >= limit)
-                    break;
-                knobs.push_back(pr);
-            }
+            const char* order[] = {"position", "wave", "cutoff", "reso", "resonance", "drive", "mix", "tone", "out"};
+            const auto knobs = take(d, {order[0], order[1], order[2], order[3], order[4], order[5], order[6], order[7], order[8]},
+                                     knobsOnly ? 4 : 2);
             const int count = static_cast<int>(knobs.size());
-            const int cols = count <= 1 ? 1 : 2;
-            const float rowPitch = knobD + 42.f;
+            const float rowPitch = knobD + 22.f;
+            const float gridTop = r.y + titleH + std::max(0.f, (cardH - titleH - (rowPitch + knobD) - 8.f) * 0.5f);
             for (int k = 0; k < count; ++k) {
-                const int col = k % cols;
-                const int row = k / cols;
-                const float cxk = r.x + (cols == 1 ? r.w * 0.5f : (col == 0 ? r.w * 0.32f : r.w * 0.68f));
-                float cyk = r.y + knobCy;
-                if (knobsOnly)
-                    cyk = r.y + knobCy - rowPitch * 0.5f + static_cast<float>(row) * rowPitch;
+                const int col = k % 2;
+                const int row = k / 2;
+                const float cxk = r.x + (count == 1 ? r.w * 0.5f : (col == 0 ? r.w * 0.27f : r.w * 0.73f));
+                const float cyk = knobsOnly ? gridTop + knobD * 0.5f + static_cast<float>(row) * rowPitch : r.y + knobCy;
                 const float norm = knobNorm(knobs[static_cast<size_t>(k)].second);
-                darkKnob(c, cxk, cyk, knobD, norm, shortParam(knobs[static_cast<size_t>(k)].first),
-                         paramText(knobs[static_cast<size_t>(k)].second));
+                chainKnob(c, cxk, cyk, knobD, norm, shortParam(knobs[static_cast<size_t>(k)].first));
                 Control ctl;
                 ctl.id = "dev/" + d.id + "/" + knobs[static_cast<size_t>(k)].first;
                 ctl.kind = ControlKind::Knob;
@@ -1011,21 +1086,24 @@ void deviceChain(Canvas& c, const Frame& f) {
         }
         if (i + 1 < n) {
             const float nextX = r.x + cardW + gap;
-            if (nextX + cardW <= box.x + box.w - sideW - 12.f)
-                goldJoin(c, r.x + r.w, nextX, knobsOnly ? top + knobCy : joinY);
+            if (nextX + cardW <= box.x + box.w - sideW - 16.f)
+                goldJoin(c, r.x + r.w + 2.f, nextX - 2.f, joinY);
         }
     }
-    Rect mod{box.x + box.w - sideW, top, sideW - 8.f, cardH};
-    c.drawText("LFO", mod.x + 12.f, mod.y + 8.f, 18.f, ink(), true);
-    const float body = std::max(64.f, (mod.h - 150.f) / 3.f);
-    c.drawText("Envelope", mod.x + 12.f, mod.y + 36.f, 18.f, dim(), false);
-    drawEnvelope(c, {mod.x + 12.f, mod.y + 58.f, mod.w - 24.f, body});
-    const float y2 = mod.y + 70.f + body;
-    c.drawText("LFO", mod.x + 12.f, y2, 18.f, dim(), false);
-    drawLfo(c, {mod.x + 12.f, y2 + 22.f, mod.w - 24.f, body});
-    const float y3 = y2 + 34.f + body;
-    c.drawText("Envelope", mod.x + 12.f, y3, 18.f, dim(), false);
-    drawEnvelope(c, {mod.x + 12.f, y3 + 22.f, mod.w - 24.f, std::max(64.f, mod.y + mod.h - y3 - 34.f)});
+    Rect mod{box.x + box.w - sideW, top, sideW - 14.f, cardH};
+    c.drawText("LFO", mod.x + 4.f, box.y + 10.f, 22.f, ink(), true);
+    const char* titles[] = {"Envelope", "LFO", "Envelope"};
+    const float slot = (mod.h - 8.f) / 3.f;
+    for (int s = 0; s < 3; ++s) {
+        Rect card{mod.x, mod.y + static_cast<float>(s) * slot, mod.w, slot - 8.f};
+        chainCard(c, card);
+        c.drawText(titles[s], card.x + 10.f, card.y + 6.f, 18.f, dim(), false);
+        Rect body{card.x + 8.f, card.y + 28.f, card.w - 16.f, card.h - 36.f};
+        if (s == 1)
+            drawLfo(c, body);
+        else
+            drawEnvelope(c, body);
+    }
 }
 
 void piano(Canvas& c, const Frame& f) {

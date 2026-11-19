@@ -50,7 +50,7 @@ A source gate rejects the old framework's type names, module headers, Projucer f
 4. Per-monitor DPI v2 is requested with `SetProcessDpiAwarenessContext` (awareness context `-4`) and applied again on `WM_DPICHANGED`.
 5. The top-bar badge is the canvas backend name: `D3D11`, `WARP`, or `CPU`. It is not a generic "GPU" label.
 6. Shadows: on Direct2D, draw the shape into a compatible render target and run `CLSID_D2D1Shadow`. Cache the effect by width, height, blur, and corner radius. On the software canvas, rasterize a rounded mask and box-blur it, with the same cache key. Blurs use `CLSID_D2D1GaussianBlur` or a cached box blur, keyed by the caller so a static panel is not rebuilt every frame.
-7. Knobs: 100-frame DarkKnob filmstrip (`assets/DarkKnob4_Stitched.png`, 220 px frames). Frame index is the normalized, skewed parameter, not a linear frequency. The arc runs from -145° to +145° around up, in `#FF6E00`, with a bone pointer `#D1BCAC`.
+7. Knobs: 100-frame DarkKnob filmstrip (`assets/DarkKnob4_Stitched.png`, 220 px frames) on the mixer and the generic knob. Frame index is the normalized, skewed parameter, not a linear frequency. The arc runs from -145° to +145° around up, in `#FF6E00`, with a bone pointer `#D1BCAC`. Device-chain knobs are drawn to the same colors (`#231F20` disc, `#D1BCAC` pointer, `#FF6E00` arc) at about 40% of the card width, because a fixed 48 px disc does not fill the card.
 8. Palette for chrome: near-black `#0A0A0A`, warm brown `#3C3732`, antique gold `#B49637`, goldenrod `#DAA520`, amber `#FF821E`. EQ band colors from the identity sheet belong on the EQ graph only.
 
 ### Parameters and state
