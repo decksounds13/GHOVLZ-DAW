@@ -135,7 +135,6 @@ private:
         if (!hwnd_)
             return false;
         paintNative();
-        hookRunLoop();
         return true;
 #else
         display_ = XOpenDisplay(nullptr);
@@ -161,6 +160,7 @@ private:
 #endif
     }
     void hookRunLoop() {
+#if SMTG_OS_LINUX
         if (!frame_ || timerOn_)
             return;
         Linux::IRunLoop* loop = nullptr;
@@ -169,8 +169,10 @@ private:
         if (loop->registerTimer(&tick_, 32) == kResultOk)
             timerOn_ = true;
         loop->release();
+#endif
     }
     void unhookRunLoop() {
+#if SMTG_OS_LINUX
         if (!frame_ || !timerOn_)
             return;
         Linux::IRunLoop* loop = nullptr;
@@ -179,6 +181,7 @@ private:
             loop->release();
         }
         timerOn_ = false;
+#endif
     }
     void resizeNative() {
         const int w = rect_.getWidth();

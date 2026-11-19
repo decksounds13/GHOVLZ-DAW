@@ -36,6 +36,16 @@
 #include <unistd.h>
 #endif
 
+namespace Steinberg {
+#if !SMTG_OS_LINUX
+// commoniids.cpp defines these only when SMTG_OS_LINUX is set. The host frame
+// still implements the interface, so the symbols have to exist on Windows too.
+DEF_CLASS_IID(Linux::IRunLoop)
+DEF_CLASS_IID(Linux::IEventHandler)
+DEF_CLASS_IID(Linux::ITimerHandler)
+#endif
+} // namespace Steinberg
+
 namespace ghovlz {
 namespace {
 
