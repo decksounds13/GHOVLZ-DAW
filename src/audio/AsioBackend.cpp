@@ -20,10 +20,14 @@
 #include <string>
 #include <vector>
 
+// The SDK defines this at global scope in asiodrivers.cpp. An anonymous
+// namespace would give the declaration internal linkage and the compiler
+// would reject it as unused.
+extern AsioDrivers* asioDrivers;
+
 namespace ghovlz {
 namespace {
 
-extern AsioDrivers* asioDrivers;
 Engine* bound = nullptr;
 ASIOBufferInfo infos[4] {};
 ASIOSampleType sampleType = ASIOSTFloat32LSB;
