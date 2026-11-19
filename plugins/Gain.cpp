@@ -124,14 +124,14 @@ private:
         static bool registered = false;
         if (!registered) {
             WNDCLASSW cls {};
-            cls.lpfnWndProc = DefWindowProcW;
+            cls.lpfnWndProc = wndProc;
             cls.hInstance = GetModuleHandleW(nullptr);
             cls.lpszClassName = L"GhovlzGainView";
-            cls.hbrBackground = CreateSolidBrush(RGB(10, 10, 10));
+            cls.hbrBackground = static_cast<HBRUSH>(GetStockObject(NULL_BRUSH));
             registered = RegisterClassW(&cls) != 0;
         }
         hwnd_ = CreateWindowExW(0, L"GhovlzGainView", L"", WS_CHILD | WS_VISIBLE, 0, 0, w, h,
-                                static_cast<HWND>(parent_), nullptr, GetModuleHandleW(nullptr), nullptr);
+                                static_cast<HWND>(parent_), nullptr, GetModuleHandleW(nullptr), this);
         if (!hwnd_)
             return false;
         paintNative();
@@ -196,34 +196,63 @@ private:
         }
 #endif
     }
-    void paintNative() {
+#if defined(_WIN32)
+    void paintInto(HDC hdc) const {
         const int w = std::max(1, rect_.getWidth());
         const int h = std::max(1, rect_.getHeight());
-#if defined(_WIN32)
-        if (!hwnd_)
-            return;
-        HDC hdc = GetDC(hwnd_);
-        if (!hdc)
-            return;
         RECT rc {0, 0, w, h};
         HBRUSH bg = CreateSolidBrush(RGB(10, 10, 10));
         FillRect(hdc, &rc, bg);
         DeleteObject(bg);
         HBRUSH gold = CreateSolidBrush(RGB(180, 150, 55));
-        SelectObject(hdc, gold);
         const int cx = w / 2;
         const int cy = h / 2;
         const int disc = std::max(24, static_cast<int>(std::lround(36.f * scale_)));
         const int bar = std::max(8, static_cast<int>(std::lround(8.f * scale_)));
         RECT barRc {0, 0, w, bar};
         FillRect(hdc, &barRc, gold);
+        SelectObject(hdc, gold);
         Ellipse(hdc, cx - disc, cy - disc, cx + disc, cy + disc);
         DeleteObject(gold);
         SetBkMode(hdc, TRANSPARENT);
         SetTextColor(hdc, RGB(245, 245, 245));
         TextOutW(hdc, 16, 16, L"GHOVLZ Gain", 11);
-        ReleaseDC(hwnd_, hdc);
+    }
+
+    static LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+        if (msg == WM_NCCREATE) {
+            const auto* created = reinterpret_cast<CREATESTRUCTW*>(lp);
+            SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(created->lpCreateParams));
+        }
+        auto* self = reinterpret_cast<GainView*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+        if (self && msg == WM_PAINT) {
+            PAINTSTRUCT ps {};
+            const HDC hdc = BeginPaint(hwnd, &ps);
+            self->paintInto(hdc);
+            EndPaint(hwnd, &ps);
+            return 0;
+        }
+        if (self && msg == WM_PRINTCLIENT) {
+            self->paintInto(reinterpret_cast<HDC>(wp));
+            return 0;
+        }
+        return DefWindowProcW(hwnd, msg, wp, lp);
+    }
+#endif
+
+    void paintNative() {
+#if defined(_WIN32)
+        if (!hwnd_)
+            return;
+        HDC hdc = GetDC(hwnd_);
+        if (hdc) {
+            paintInto(hdc);
+            ReleaseDC(hwnd_, hdc);
+        }
+        InvalidateRect(hwnd_, nullptr, FALSE);
 #else
+        const int w = std::max(1, rect_.getWidth());
+        const int h = std::max(1, rect_.getHeight());
         if (!display_ || !child_ || !gc_)
             return;
         for (int attempt = 0; attempt < 40; ++attempt) {
