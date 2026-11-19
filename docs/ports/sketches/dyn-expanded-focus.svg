@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="700" viewBox="0 0 980 700">
+  <rect width="980" height="700" fill="#0A0A0A"/>
+  <text x="16" y="22" fill="#D1BCAC" font-family="ui-sans-serif,Segoe UI,sans-serif" font-size="13">DYN expanded, Focus — r3 layout from dyn/main docs/PLAN.md (approved 2026-08-15)</text>
+  <rect x="16" y="36" width="948" height="32" rx="4" fill="#161311" stroke="#3C3732"/>
+  <text x="28" y="57" fill="#E8DCC8" font-family="ui-sans-serif,Segoe UI,sans-serif" font-size="12">Bypass  A B C D  Preset ▾  Eco  OS: Off ▾  Detect: Peak ▾  Learn  ⌄   Focus | All</text>
+  <!-- spectrum -->
+  <rect x="16" y="76" width="868" height="250" fill="#100E0C" stroke="#3C3732"/>
+  <rect x="16" y="76" width="280" height="250" fill="#7CFF6E" opacity="0.12"/>
+  <rect x="296" y="76" width="280" height="250" fill="#6EC8FF" opacity="0.12"/>
+  <rect x="576" y="76" width="308" height="250" fill="#FF6E00" opacity="0.14"/>
+  <line x1="296" y1="76" x2="296" y2="326" stroke="#B49637"/>
+  <line x1="576" y1="76" x2="576" y2="326" stroke="#B49637"/>
+  <line x1="30" y1="180" x2="290" y2="180" stroke="#7CFF6E" stroke-width="1.6"/>
+  <line x1="30" y1="210" x2="290" y2="210" stroke="#7CFF6E" stroke-width="1" stroke-dasharray="4 3"/>
+  <text x="36" y="100" fill="#7CFF6E" font-family="ui-sans-serif,Segoe UI,sans-serif" font-size="11">Band 1  Thr −18  Make 0</text>
+  <text x="310" y="100" fill="#6EC8FF" font-family="ui-sans-serif,Segoe UI,sans-serif" font-size="11">Band 2</text>
+  <text x="590" y="100" fill="#FF6E00" font-family="ui-sans-serif,Segoe UI,sans-serif" font-size="11">Band 3</text>
+  <polygon points="30,300 80,260 140,220 200,240 300,200 400,180 520,210 700,240 860,280 860,310 30,310" fill="#E8DCC8" opacity="0.2"/>
+  <!-- IN OUT -->
+  <rect x="892" y="76" width="32" height="250" fill="#100E0C" stroke="#3C3732"/>
+  <rect x="902" y="160" width="5" height="150" fill="#FF821E"/>
+  <rect x="912" y="140" width="5" height="170" fill="#DAA520"/>
+  <text x="894" y="70" fill="#8A8078" font-family="ui-sans-serif,Segoe UI,sans-serif" font-size="10">I O</text>
+  <!-- focus row -->
+  <rect x="16" y="336" width="300" height="250" fill="#120F0D" stroke="#3C3732"/>
+  <text x="28" y="356" fill="#D1BCAC" font-family="ui-sans-serif,Segoe UI,sans-serif" font-size="12">Transfer  (square)</text>
+  <line x1="50" y1="540" x2="280" y2="380" stroke="#3C3732"/>
+  <polyline points="50,540 140,470 180,400 280,360" fill="none" stroke="#FF6E00" stroke-width="2"/>
+  <circle cx="170" cy="420" r="5" fill="#E8DCC8"/>
+  <text x="50" y="568" fill="#8A8078" font-family="ui-sans-serif,Segoe UI,sans-serif" font-size="10">in dB → out dB, live ball = envelope</text>
+  <rect x="324" y="336" width="500" height="250" fill="#120F0D" stroke="#B49637"/>
+  <text x="340" y="356" fill="#E8DCC8" font-family="ui-sans-serif,Segoe UI,sans-serif" font-size="12">Band 2 knobs  +  GR rail (0 dB at top, reduction grows down)</text>
+  <g fill="none" stroke="#FF6E00" stroke-width="3">
+    <circle cx="370" cy="430" r="22"/>
+    <circle cx="440" cy="430" r="22"/>
+    <circle cx="510" cy="430" r="22"/>
+    <circle cx="580" cy="430" r="22"/>
+    <circle cx="650" cy="430" r="22"/>
+    <circle cx="720" cy="430" r="22"/>
+  </g>
+  <g fill="#8A8078" font-family="ui-sans-serif,Segoe UI,sans-serif" font-size="10">
+    <text x="352" y="470">Thr</text>
+    <text x="424" y="470">Ratio</text>
+    <text x="492" y="470">Atk</text>
+    <text x="562" y="470">Rel</text>
+    <text x="634" y="470">Knee</text>
+    <text x="700" y="470">Make</text>
+  </g>
+  <rect x="760" y="380" width="40" height="160" fill="#1A1614" stroke="#3C3732"/>
+  <rect x="768" y="390" width="10" height="70" fill="#FF6E00"/>
+  <text x="756" y="556" fill="#8A8078" font-family="ui-sans-serif,Segoe UI,sans-serif" font-size="10">GR</text>
+  <rect x="832" y="336" width="132" height="250" fill="#120F0D" stroke="#3C3732"/>
+  <text x="844" y="360" fill="#D1BCAC" font-family="ui-sans-serif,Segoe UI,sans-serif" font-size="12">Global</text>
+  <text x="844" y="400" fill="#8A8078" font-family="ui-sans-serif,Segoe UI,sans-serif" font-size="11">Time 100</text>
+  <text x="844" y="424" fill="#8A8078" font-family="ui-sans-serif,Segoe UI,sans-serif" font-size="11">Amount 100</text>
+  <text x="844" y="448" fill="#8A8078" font-family="ui-sans-serif,Segoe UI,sans-serif" font-size="11">Down 100</text>
+  <text x="844" y="472" fill="#8A8078" font-family="ui-sans-serif,Segoe UI,sans-serif" font-size="11">Up 100</text>
+  <rect x="16" y="598" width="948" height="30" fill="#2A2118"/>
+  <text x="28" y="618" fill="#B49637" font-family="ui-sans-serif,Segoe UI,sans-serif" font-size="12">?   Minimum Phase ▾        GHOVLZ! DYN        Look 0.0 ms    A    Out 0.0 dB</text>
+  <text x="16" y="656" fill="#8A8078" font-family="ui-sans-serif,Segoe UI,sans-serif" font-size="11">r2’s mid-row oscilloscope is not in this layout. dyn/main setDynShellMode hides Osc, Gon, Spec, and Scope.</text>
+  <text x="16" y="678" fill="#8A8078" font-family="ui-sans-serif,Segoe UI,sans-serif" font-size="11">Up-threshold is a second drag path on the spectrum (dashed). Clip threshold is a third path, drawn only when clip drive is up.</text>
+</svg>

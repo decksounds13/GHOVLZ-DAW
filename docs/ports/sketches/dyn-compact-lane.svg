@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="240" viewBox="0 0 640 240">
+  <rect width="640" height="240" fill="#0A0A0A"/>
+  <text x="16" y="22" fill="#D1BCAC" font-family="ui-sans-serif,Segoe UI,sans-serif" font-size="13">DYN compact tile, inside the 176 px arrangement lane</text>
+  <rect x="16" y="36" width="360" height="156" rx="8" fill="#120F0D" stroke="#3C3732"/>
+  <rect x="16" y="36" width="4" height="156" fill="#FF821E"/>
+  <text x="28" y="54" fill="#E8DCC8" font-family="ui-sans-serif,Segoe UI,sans-serif" font-size="13" font-weight="600">DYN</text>
+  <text x="70" y="54" fill="#8A8078" font-family="ui-sans-serif,Segoe UI,sans-serif" font-size="11">3 bands</text>
+  <text x="340" y="54" fill="#DAA520" font-family="ui-sans-serif,Segoe UI,sans-serif" font-size="14">⌃</text>
+  <!-- three band washes -->
+  <rect x="28" y="66" width="100" height="100" fill="#7CFF6E" opacity="0.18"/>
+  <rect x="128" y="66" width="110" height="100" fill="#6EC8FF" opacity="0.18"/>
+  <rect x="238" y="66" width="120" height="100" fill="#FF6E00" opacity="0.22"/>
+  <polygon points="28,150 60,130 100,110 140,120 180,100 230,125 280,140 340,155 358,160 28,160" fill="#E8DCC8" opacity="0.25"/>
+  <!-- threshold and makeup -->
+  <line x1="28" y1="100" x2="128" y2="100" stroke="#7CFF6E" stroke-width="1.4"/>
+  <line x1="128" y1="112" x2="238" y2="112" stroke="#6EC8FF" stroke-width="1.4"/>
+  <line x1="238" y1="96" x2="358" y2="96" stroke="#FF6E00" stroke-width="1.4"/>
+  <line x1="28" y1="78" x2="128" y2="78" stroke="#D1BCAC" stroke-width="1" stroke-dasharray="3 2"/>
+  <!-- splits -->
+  <line x1="128" y1="66" x2="128" y2="166" stroke="#B49637" stroke-width="1.5"/>
+  <line x1="238" y1="66" x2="238" y2="166" stroke="#B49637" stroke-width="1.5"/>
+  <text x="28" y="182" fill="#8A8078" font-family="ui-sans-serif,Segoe UI,sans-serif" font-size="10">drag split  ·  drag threshold  ·  drag makeup  ·  double-click adds a band (max 6)</text>
+  <text x="16" y="220" fill="#8A8078" font-family="ui-sans-serif,Segoe UI,sans-serif" font-size="11">Wheel over a band edits ratio. Right-click: solo or delete. Expand opens the r3 faceplate.</text>
+</svg>
