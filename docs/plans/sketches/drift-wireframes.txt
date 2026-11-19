@@ -1,0 +1,67 @@
+Drift wireframes. Palette from src/ui/Paint.cpp:
+  field #0A0A0A, panel #161311, panel2 #221E1A, line #3C3732,
+  antique gold #B49637, goldenrod #DAA520, amber #FF821E,
+  knob arc #FF6E00, bone pointer #D1BCAC, ink #F5F5F5, dim #A39890.
+SVG twins: drift-lane.svg, drift-expanded.svg.
+Working name DRIFT. Jeremy names the product.
+
+LANE (device chain, one panel, about 280 x 460 inside the existing chain)
+
+  +------------------------------------------+
+  | DRIFT                          TUBE      |
+  | +--------------------------------------+ |
+  | | transfer                             | |
+  | |            ___                       | |
+  | |        __/   amber R                 | |
+  | |    ___/  gold L                      | |
+  | | __/                                  | |
+  | +--------------------------------------+ |
+  |   (o)      (o)      (o)      (o)        |
+  |  DRIVE    MOTION    CORR    OFFSET      |
+  |                                          |
+  |  CORR 0 identical     CORR 1 independent |
+  |  [========output corr 0.62====    ]      |
+  |                                          |
+  |  H2 H3 H4 H5     gold bars | amber bars  |
+  |                                          |
+  |  [ L/R ] [ M/S ]              [ 4x OS ]  |
+  +------------------------------------------+
+
+  The lane is the panel deviceChain() already draws, with a type-specific
+  body when the device type is drift. Six generic knobs are not enough:
+  the transfer pair and the two harmonic rows are the point of the device.
+
+EXPANDED (device view, selected Drift)
+
+  +------------------------------------------------------------------------+
+  | DRIFT     analog character                         seed 18421  4x 18sm |
+  | +---------------------------+  +------------------------------------+  |
+  | | PER-CHANNEL TRANSFER      |  | HARMONICS                          |  |
+  | |   two curves, animated    |  |  gold row L     amber row R        |  |
+  | |   gold L    amber R       |  |  H1..H8                            |  |
+  | +---------------------------+  |  output correlation meter          |  |
+  |                                +------------------------------------+  |
+  | MODE [Tube v]  (drive) (bias) (curve) (pre) (dyn) (mix) (out)          |
+  | +--------------------------------------------------+ +---------------+ |
+  | | MOTION                                           | | MONO GUARD    | |
+  | | source  rate  depth  correlation  offset  sync   | | off           | |
+  | | Random  0.8Hz 0.65   1.00 indep.  0.35 static    | | meter is not  | |
+  | | offset is a fixed curve difference at depth 0    | | the control   | |
+  +------------------------------------------------------------------------+
+
+  Tape mode adds a second row, hidden for the other modes:
+  solver, speed, bias, gap, spacing, thickness, wow, flutter, chew, degrade.
+  Those controls stay off the lane.
+
+TRACK TOGGLE (later, not the first ship)
+
+  mixer strip, under the insert slots:
+
+  +--------+
+  | ANALOG |  <- gold when on, line color when off
+  | o tiny |  <- one trim, opens nothing
+  +--------+
+
+  It is a console-mode preset of the same section, with tolerance, hiss,
+  and crosstalk. It does not draw the transfer pair. The core stereo-motion
+  test is a Drift acceptance test, not a mixer-strip test.
