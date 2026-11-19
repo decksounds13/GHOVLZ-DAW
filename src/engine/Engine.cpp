@@ -1,4 +1,5 @@
 #include "engine/Engine.h"
+#include "model/Edit.h"
 #include "core/RtGuard.h"
 #include "dsp/Devices.h"
 #include "host/PluginHost.h"
@@ -632,7 +633,7 @@ void Engine::process(float* interleavedOut, const float* interleavedIn, int fram
                         auto it = g->media.find(clip.mediaId);
                         if (it != g->media.end() && it->second) {
                             const auto& m = *it->second;
-                            const double start = (local + clip.offsetQ) * spq * (m.sampleRate / sampleRate_);
+                            const double start = (mapWarp(clip.warp, local) + clip.offsetQ) * spq * (m.sampleRate / sampleRate_);
                             for (int i = 0; i < frames; ++i) {
                                 const int idx = static_cast<int>(start + i * m.sampleRate / sampleRate_);
                                 if (idx < 0 || idx >= static_cast<int>(m.interleaved.size() / m.channels))
@@ -667,7 +668,8 @@ void Engine::process(float* interleavedOut, const float* interleavedIn, int fram
                                 const double qq = q + i / spq;
                                 if (qq < clip.startQ || qq >= clip.startQ + clip.lengthQ)
                                     continue;
-                                const double local = (qq - clip.startQ + clip.offsetQ) * spq * (m.sampleRate / sampleRate_);
+                                const double along = qq - clip.startQ;
+                                const double local = (mapWarp(clip.warp, along) + clip.offsetQ) * spq * (m.sampleRate / sampleRate_);
                                 const int idx = static_cast<int>(local);
                                 const int total = static_cast<int>(m.interleaved.size() / std::max(1, m.channels));
                                 if (idx < 0 || total <= 0)
@@ -1217,6 +1219,16 @@ Device* Engine::device(const std::string& id) {
     releaseGraph();
     return found;
 }
+namespace {
+double nextBarOrigin(double q) {
+    const double bar = 4.0;
+    const double base = std::floor(q / bar + 1e-9) * bar;
+    if (q - base < 1e-4)
+        return base;
+    return base + bar;
+}
+} // namespace
+
 void Engine::launchScene(int scene) {
     Graph* g = acquire();
     if (g) {
@@ -1230,14 +1242,64 @@ void Engine::launchScene(int scene) {
     releaseGraph();
     play();
 }
-void Engine::launchSlot(const std::string& track, int scene) {
+void Engine::launchSceneQuantized(int scene) {
+    const double origin = nextBarOrigin(playhead_.load());
     Graph* g = acquire();
-    if (auto* n = liveNode(g, track)) {
-        n->sessionScene.store(scene);
-        n->sessionOrigin.store(playhead_.load());
+    if (g) {
+        for (auto& n : g->nodes) {
+            if (scene >= 0 && scene < static_cast<int>(n->slots.size()) && n->slots[scene]) {
+                n->sessionScene.store(scene);
+                n->sessionOrigin.store(origin);
+            }
+        }
     }
     releaseGraph();
     play();
+}
+void Engine::launchSlot(const std::string& track, int scene) {
+    Graph* g = acquire();
+    bool start = false;
+    if (auto* n = liveNode(g, track)) {
+        if (n->sessionScene.load() == scene) {
+            n->sessionScene.store(-1);
+        } else if (scene >= 0) {
+            n->sessionScene.store(scene);
+            n->sessionOrigin.store(playhead_.load());
+            start = true;
+        }
+    }
+    releaseGraph();
+    if (start)
+        play();
+}
+void Engine::stopSession() {
+    Graph* g = acquire();
+    if (g)
+        for (auto& n : g->nodes)
+            n->sessionScene.store(-1);
+    releaseGraph();
+}
+void Engine::stopSlot(const std::string& track) {
+    Graph* g = acquire();
+    if (auto* n = liveNode(g, track))
+        n->sessionScene.store(-1);
+    releaseGraph();
+}
+int Engine::playingScene(const std::string& track) {
+    Graph* g = acquire();
+    int scene = -1;
+    if (auto* n = liveNode(g, track))
+        scene = n->sessionScene.load();
+    releaseGraph();
+    return scene;
+}
+double Engine::slotOrigin(const std::string& track) {
+    Graph* g = acquire();
+    double origin = 0;
+    if (auto* n = liveNode(g, track))
+        origin = n->sessionOrigin.load();
+    releaseGraph();
+    return origin;
 }
 
 void Engine::finalizeTakes() {

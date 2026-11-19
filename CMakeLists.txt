@@ -108,6 +108,7 @@ add_library(ghovlz_core STATIC
     src/io/WavFile.cpp
     src/model/Project.cpp
     src/model/Undo.cpp
+    src/model/Edit.cpp
     src/io/DiskWriter.cpp
     src/engine/Engine.cpp
     src/ui/Theme.cpp
@@ -156,7 +157,7 @@ if(GHOVLZ_RT_ABORT)
     add_compile_definitions(GHOVLZ_RT_ABORT)
 endif()
 
-add_executable(GhovlzTests tests/Tests.cpp tests/ThemeTests.cpp tests/Pass3Tests.cpp src/ui/Paint.cpp src/ui/SoftwareCanvas.cpp)
+add_executable(GhovlzTests tests/Tests.cpp tests/ThemeTests.cpp tests/Pass3Tests.cpp tests/EditTests.cpp src/ui/Paint.cpp src/ui/SoftwareCanvas.cpp)
 target_link_libraries(GhovlzTests PRIVATE ghovlz_core Catch2::Catch2WithMain)
 target_include_directories(GhovlzTests PRIVATE "${stb_SOURCE_DIR}")
 target_compile_definitions(GhovlzTests PRIVATE GHOVLZ_ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets")

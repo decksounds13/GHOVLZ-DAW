@@ -61,7 +61,12 @@ public:
     Device* device(const std::string& id);
 
     void launchScene(int scene);
+    void launchSceneQuantized(int scene);
     void launchSlot(const std::string& track, int scene);
+    void stopSession();
+    void stopSlot(const std::string& track);
+    int playingScene(const std::string& track);
+    double slotOrigin(const std::string& track);
     bool saveProject(const std::string& folder);
     bool loadProject(const std::string& folder);
     bool renderToWav(const std::string& path);

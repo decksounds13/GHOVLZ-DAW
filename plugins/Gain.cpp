@@ -1,6 +1,7 @@
 #include "public.sdk/source/main/pluginfactory.h"
 #include "public.sdk/source/vst/vstsinglecomponenteffect.h"
 #include "pluginterfaces/base/ibstream.h"
+#include "pluginterfaces/gui/iplugview.h"
 #include "pluginterfaces/vst/ivstparameterchanges.h"
 
 #include <cstring>
@@ -9,6 +10,78 @@ namespace Steinberg {
 namespace Vst {
 
 static constexpr ParamID kGainId = 100;
+
+// HOST-07. Accepts the embed handshake for HWND and X11. The parent is stored.
+// A native child window is not created here; the host still drives attached() and removed().
+class GainView final : public IPlugView {
+public:
+    GainView() { FUNKNOWN_CTOR }
+    ~GainView() { FUNKNOWN_DTOR }
+
+    DECLARE_FUNKNOWN_METHODS
+
+    tresult PLUGIN_API isPlatformTypeSupported(FIDString type) SMTG_OVERRIDE {
+        if (!type)
+            return kResultFalse;
+        if (std::strcmp(type, kPlatformTypeHWND) == 0 || std::strcmp(type, kPlatformTypeX11EmbedWindowID) == 0)
+            return kResultTrue;
+        return kResultFalse;
+    }
+    tresult PLUGIN_API attached(void* parent, FIDString type) SMTG_OVERRIDE {
+        if (!parent || isPlatformTypeSupported(type) != kResultTrue)
+            return kResultFalse;
+        parent_ = parent;
+        return kResultOk;
+    }
+    tresult PLUGIN_API removed() SMTG_OVERRIDE {
+        parent_ = nullptr;
+        return kResultOk;
+    }
+    tresult PLUGIN_API onWheel(float) SMTG_OVERRIDE { return kResultFalse; }
+    tresult PLUGIN_API onKeyDown(char16, int16, int16) SMTG_OVERRIDE { return kResultFalse; }
+    tresult PLUGIN_API onKeyUp(char16, int16, int16) SMTG_OVERRIDE { return kResultFalse; }
+    tresult PLUGIN_API getSize(ViewRect* size) SMTG_OVERRIDE {
+        if (!size)
+            return kInvalidArgument;
+        size->left = 0;
+        size->top = 0;
+        size->right = 480;
+        size->bottom = 300;
+        return kResultOk;
+    }
+    tresult PLUGIN_API onSize(ViewRect* newSize) SMTG_OVERRIDE {
+        if (!newSize)
+            return kInvalidArgument;
+        rect_ = *newSize;
+        return kResultOk;
+    }
+    tresult PLUGIN_API onFocus(TBool) SMTG_OVERRIDE { return kResultOk; }
+    tresult PLUGIN_API setFrame(IPlugFrame* frame) SMTG_OVERRIDE {
+        frame_ = frame;
+        return kResultOk;
+    }
+    tresult PLUGIN_API canResize() SMTG_OVERRIDE { return kResultFalse; }
+    tresult PLUGIN_API checkSizeConstraint(ViewRect* rect) SMTG_OVERRIDE {
+        if (!rect)
+            return kInvalidArgument;
+        rect->right = rect->left + 480;
+        rect->bottom = rect->top + 300;
+        return kResultOk;
+    }
+
+private:
+    void* parent_ = nullptr;
+    IPlugFrame* frame_ = nullptr;
+    ViewRect rect_ {0, 0, 480, 300};
+};
+
+tresult PLUGIN_API GainView::queryInterface(const TUID iid, void** obj) {
+    QUERY_INTERFACE(iid, obj, IPlugView::iid, IPlugView)
+    QUERY_INTERFACE(iid, obj, FUnknown::iid, IPlugView)
+    *obj = nullptr;
+    return kNoInterface;
+}
+IMPLEMENT_REFCOUNT(GainView)
 
 class GainProcessor final : public SingleComponentEffect {
 public:
@@ -74,6 +147,11 @@ public:
         if (auto* p = parameters.getParameter(kGainId))
             p->setNormalized(g * 0.5);
         return kResultOk;
+    }
+    IPlugView* PLUGIN_API createView(FIDString name) SMTG_OVERRIDE {
+        if (name && std::strcmp(name, ViewType::kEditor) == 0)
+            return new GainView;
+        return nullptr;
     }
 
 private:

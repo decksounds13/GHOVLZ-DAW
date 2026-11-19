@@ -33,8 +33,15 @@ json clipJson(const Clip& c) {
     json notes = json::array();
     for (const auto& n : c.notes)
         notes.push_back({{"start", n.startQ}, {"length", n.lengthQ}, {"pitch", n.pitch}, {"vel", n.velocity}});
-    return {{"id", c.id}, {"name", c.name}, {"start", c.startQ}, {"length", c.lengthQ},
-            {"offset", c.offsetQ}, {"media", c.mediaId}, {"color", colorHex(c.color)}, {"notes", notes}};
+    json j = {{"id", c.id}, {"name", c.name}, {"start", c.startQ}, {"length", c.lengthQ},
+              {"offset", c.offsetQ}, {"media", c.mediaId}, {"color", colorHex(c.color)}, {"notes", notes}};
+    if (!c.warp.empty()) {
+        json warp = json::array();
+        for (const auto& m : c.warp)
+            warp.push_back({{"source", m.sourceQ}, {"output", m.outputQ}});
+        j["warp"] = warp;
+    }
+    return j;
 }
 Clip clipFrom(const json& j) {
     Clip c;
@@ -48,6 +55,10 @@ Clip clipFrom(const json& j) {
     if (j.contains("notes")) {
         for (const auto& n : j["notes"])
             c.notes.push_back(Note{n.value("start", 0.0), n.value("length", 1.0), n.value("pitch", 60), n.value("vel", 0.8f)});
+    }
+    if (j.contains("warp")) {
+        for (const auto& m : j["warp"])
+            c.warp.push_back(WarpMark{m.value("source", 0.0), m.value("output", 0.0)});
     }
     return c;
 }

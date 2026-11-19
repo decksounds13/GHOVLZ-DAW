@@ -30,6 +30,11 @@ struct Note {
     float velocity = 0.8f;
 };
 
+struct WarpMark {
+    double sourceQ = 0;
+    double outputQ = 0;
+};
+
 struct Clip {
     std::string id;
     std::string name;
@@ -38,6 +43,7 @@ struct Clip {
     double offsetQ = 0;
     std::string mediaId;
     std::vector<Note> notes;
+    std::vector<WarpMark> warp;
     uint32_t color = 0xFFB49637;
 };
 

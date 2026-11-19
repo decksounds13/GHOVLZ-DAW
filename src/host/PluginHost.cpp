@@ -10,6 +10,7 @@
 #include "pluginterfaces/vst/ivstevents.h"
 #include "pluginterfaces/vst/ivstmessage.h"
 #include "pluginterfaces/vst/ivstparameterchanges.h"
+#include "pluginterfaces/gui/iplugview.h"
 
 #include <atomic>
 #include <chrono>
@@ -343,6 +344,8 @@ public:
     Steinberg::IPtr<Steinberg::Vst::IComponent> component;
     Steinberg::IPtr<Steinberg::Vst::IAudioProcessor> processor;
     Steinberg::IPtr<Steinberg::Vst::IEditController> controller;
+    Steinberg::IPtr<Steinberg::IPlugView> view;
+    void* editorParent = nullptr;
     std::map<std::string, Steinberg::Vst::ParamID> ids;
     Steinberg::Vst::HostProcessData processData;
     std::vector<float> inL, inR, outL, outR;
@@ -362,6 +365,12 @@ public:
     ~Vst3Device() override { shutdown(); }
 
     void shutdown() {
+        if (view) {
+            if (editorParent)
+                view->removed();
+            view.reset();
+            editorParent = nullptr;
+        }
         if (processor)
             processor->setProcessing(false);
         if (component)
@@ -721,5 +730,60 @@ std::shared_ptr<Device> PluginHost::instantiate(const std::string& pluginPath, s
 
 void PluginHost::setState(Device& device, const std::string& encoded) { device.setPluginState(encoded); }
 std::string PluginHost::stateOf(const Device& device) const { return device.pluginState(); }
+
+bool PluginHost::openEditor(Device& device, void* parent, EditorAttach& out, std::string& error) {
+    auto* vst = dynamic_cast<Vst3Device*>(&device);
+    if (!vst || !vst->controller) {
+        error = "no editor controller";
+        return false;
+    }
+    if (vst->view) {
+        error = "editor already open";
+        return false;
+    }
+    Steinberg::IPlugView* created = vst->controller->createView(Steinberg::Vst::ViewType::kEditor);
+    if (!created) {
+        error = "plugin has no view";
+        return false;
+    }
+    vst->view = created;
+    created->release();
+#if defined(_WIN32)
+    const char* platform = Steinberg::kPlatformTypeHWND;
+#else
+    const char* platform = Steinberg::kPlatformTypeX11EmbedWindowID;
+#endif
+    if (vst->view->isPlatformTypeSupported(platform) != Steinberg::kResultTrue) {
+        error = "platform not supported";
+        vst->view.reset();
+        return false;
+    }
+    Steinberg::ViewRect rect;
+    if (vst->view->getSize(&rect) != Steinberg::kResultOk || rect.getWidth() < 1 || rect.getHeight() < 1) {
+        error = "view has no size";
+        vst->view.reset();
+        return false;
+    }
+    out.width = rect.getWidth();
+    out.height = rect.getHeight();
+    if (vst->view->attached(parent, platform) != Steinberg::kResultOk) {
+        error = "attach failed";
+        vst->view.reset();
+        return false;
+    }
+    vst->editorParent = parent;
+    out.open = true;
+    return true;
+}
+
+void PluginHost::closeEditor(Device& device) {
+    auto* vst = dynamic_cast<Vst3Device*>(&device);
+    if (!vst || !vst->view)
+        return;
+    if (vst->editorParent)
+        vst->view->removed();
+    vst->view.reset();
+    vst->editorParent = nullptr;
+}
 
 } // namespace ghovlz

@@ -29,6 +29,8 @@ Windows system libraries used by the app and not shipped here: Direct2D, DirectW
 
 The MIT and BSD-3 notices above are the licenses those projects publish. Their source is not copied into this tree.
 
+**EQ colour dice.** `src/ui/ColourDice.h` is a seeded re-expression of the EQ tool's ramp randomizer: 2 to 10 stops, an HSV-limit walk, and the same ordered or scattered layout. That tool draws from an unseeded system generator. This tree does not include that source. The generator here is a short PCG XSH-RR (Melissa O'Neill's published algorithm) so a seed reprints the ramp.
+
 ## Algorithms re-expressed from GHOVLZ-EQ
 
 EQ, multiband dynamics, and analyzer behavior follow the public repository https://github.com/decksounds13/GHOVLZ-EQ at these commits:

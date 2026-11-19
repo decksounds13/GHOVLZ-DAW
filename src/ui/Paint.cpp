@@ -165,6 +165,7 @@ void darkKnob(Canvas& c, float cx, float cy, float diameter, float norm, const s
         const int frameIndex = std::clamp(static_cast<int>(std::lround(norm * (frames - 1))), 0, frames - 1);
         c.drawImage(film, {0, static_cast<float>(frameIndex * frameSize), static_cast<float>(frameSize), static_cast<float>(frameSize)},
                     {cx - frame * 0.5f, cy - frame * 0.5f, frame, frame});
+        c.innerShadow({cx - rad, cy - rad, diameter, diameter}, std::max(4.f, diameter * 0.12f), Color{0, 0, 0, 150});
     } else {
         c.fillEllipse(cx, cy, rad, rad, active().color(Role::Knob));
         c.innerShadow({cx - rad, cy - rad, diameter, diameter}, 8.f, Color{0, 0, 0, 160});
@@ -341,34 +342,37 @@ void topBar(Canvas& c, const Frame& f) {
 }
 
 void glyphIcon(Canvas& c, int kind, float x, float y, Color col) {
+    c.fillRoundRect({x, y, 18.f, 18.f}, 4.f, Color{0, 0, 0, 70});
     if (kind == 0) {
-        c.line(x + 2, y + 10, x + 6, y + 4, col, 1.6f);
-        c.line(x + 6, y + 4, x + 8, y + 12, col, 1.6f);
-        c.line(x + 8, y + 12, x + 12, y + 2, col, 1.6f);
-        c.line(x + 12, y + 2, x + 16, y + 10, col, 1.6f);
+        c.line(x + 2, y + 11, x + 6, y + 4, col, 2.f);
+        c.line(x + 6, y + 4, x + 8, y + 13, col, 2.f);
+        c.line(x + 8, y + 13, x + 12, y + 3, col, 2.f);
+        c.line(x + 12, y + 3, x + 16, y + 11, col, 2.f);
     } else if (kind == 1) {
-        c.fillRoundRect({x + 2, y + 4, 12, 10}, 2.f, col);
-        c.fillRect({x + 4, y + 2, 6, 4}, col);
+        c.fillRoundRect({x + 2, y + 5, 14, 11}, 2.f, col);
+        c.fillRect({x + 5, y + 2, 8, 4}, col);
+        c.fillRect({x + 7, y + 8, 4, 4}, Color::argb(0xFF1A120C));
     } else if (kind == 2) {
-        c.fillRect({x + 3, y + 8, 3, 8}, col);
-        c.fillRect({x + 8, y + 4, 3, 12}, col);
-        c.fillRect({x + 13, y + 6, 3, 10}, col);
+        c.fillRoundRect({x + 2, y + 9, 4, 7}, 1.f, col);
+        c.fillRoundRect({x + 7, y + 4, 4, 12}, 1.f, col);
+        c.fillRoundRect({x + 12, y + 6, 4, 10}, 1.f, col);
     } else if (kind == 3) {
-        c.strokeRect({x + 2, y + 3, 14, 12}, col, 1.4f);
-        c.line(x + 2, y + 7, x + 16, y + 7, col, 1.4f);
+        c.fillRoundRect({x + 2, y + 3, 14, 12}, 2.f, col);
+        c.fillRect({x + 2, y + 7, 14, 2}, Color::argb(0xFF1A120C));
+        c.fillRect({x + 8, y + 3, 2, 12}, Color::argb(0xFF1A120C));
     } else if (kind == 4) {
-        c.line(x + 4, y + 14, x + 8, y + 3, col, 1.6f);
-        c.line(x + 8, y + 3, x + 12, y + 14, col, 1.6f);
-        c.line(x + 6, y + 10, x + 10, y + 10, col, 1.4f);
+        c.line(x + 3, y + 15, x + 9, y + 2, col, 2.2f);
+        c.line(x + 9, y + 2, x + 15, y + 15, col, 2.2f);
+        c.line(x + 6, y + 10, x + 12, y + 10, col, 2.f);
     } else if (kind == 5) {
-        c.arc(x + 7, y + 7, 5.f, 0.2f, 5.8f, col, 1.6f);
-        c.line(x + 11, y + 11, x + 16, y + 16, col, 1.8f);
+        c.arc(x + 7, y + 7, 5.5f, 0.4f, 5.6f, col, 2.f);
+        c.fillRoundRect({x + 10, y + 10, 7, 2.4f}, 1.f, col);
     } else {
-        const float cx = x + 8.f, cy = y + 8.f;
+        const float cx = x + 9.f, cy = y + 9.f;
         for (int i = 0; i < 5; ++i) {
             const float a0 = -kPi * 0.5f + i * (2.f * kPi / 5.f);
             const float a1 = -kPi * 0.5f + ((i + 2) % 5) * (2.f * kPi / 5.f);
-            c.line(cx + std::cos(a0) * 7.f, cy + std::sin(a0) * 7.f, cx + std::cos(a1) * 7.f, cy + std::sin(a1) * 7.f, col, 1.4f);
+            c.line(cx + std::cos(a0) * 7.f, cy + std::sin(a0) * 7.f, cx + std::cos(a1) * 7.f, cy + std::sin(a1) * 7.f, col, 1.8f);
         }
     }
 }
@@ -686,9 +690,9 @@ void mixer(Canvas& c, const Frame& f) {
         c.strokeRect(r, selected ? gold() : line(), selected ? 2.f : 1.f);
         c.fillRect({r.x, r.y, r.w, 5.f}, Color::argb(t->color));
         c.drawText(t->name, r.x + 8.f, r.y + 12.f, 18.f, ink(), true);
-        c.drawText("In  All Ins", r.x + 8.f, r.y + 36.f, 14.f, dim(), false);
+        c.drawText("In  All Ins", r.x + 8.f, r.y + 34.f, 16.f, dim(), false);
         const std::string out = t->output.empty() || t->id == "master" ? "Master" : t->output;
-        c.drawText(std::string("Out  ") + out, r.x + 8.f, r.y + 54.f, 14.f, dim(), false);
+        c.drawText(std::string("Out  ") + out, r.x + 8.f, r.y + 54.f, 16.f, dim(), false);
 
         const int slots = 4;
         for (int s = 0; s < slots; ++s) {
@@ -714,23 +718,23 @@ void mixer(Canvas& c, const Frame& f) {
 
         char pan[16];
         std::snprintf(pan, sizeof(pan), "%+.1f", t->pan);
-        const float panY = r.y + 320.f;
-        darkKnob(c, r.x + r.w * 0.5f, panY, 48.f, (t->pan + 1.f) * 0.5f, "Pan", pan);
+        const float panY = r.y + 308.f;
+        darkKnob(c, r.x + r.w * 0.5f, panY, 52.f, (t->pan + 1.f) * 0.5f, "Pan", pan);
         char db[16];
         std::snprintf(db, sizeof(db), "%+.1f dB", t->volumeDb);
-        centered(c, db, r.x + r.w * 0.5f, panY + 78.f, 18.f, rod(), true);
+        centered(c, db, r.x + r.w * 0.5f, panY + 78.f, 16.f, rod(), true);
 
-        const float faderTop = panY + 108.f;
+        const float faderTop = panY + 128.f;
         const float faderBot = r.y + r.h - 72.f;
-        const float faderX = r.x + 46.f;
+        const float faderX = r.x + 44.f;
         const float faderH = std::max(40.f, faderBot - faderTop);
-        Rect well{faderX, faderTop, 16.f, faderH};
-        c.fillRoundRect(well, 4.f, Color::argb(0xFF1A1614));
-        c.innerShadow(well, 4.f, Color{0, 0, 0, 180});
+        Rect well{faderX, faderTop, 22.f, faderH};
+        c.fillRoundRect(well, 5.f, Color::argb(0xFF1A1614));
+        c.innerShadow(well, 6.f, Color{0, 0, 0, 180});
         const float fn = dbNorm(t->volumeDb);
         const float fy = faderBot - fn * faderH;
-        c.fillRoundRect({faderX + 3.f, fy, 10.f, std::max(0.f, faderBot - fy)}, 2.f, Color::argb(0xFF5C4318));
-        goldCap(c, faderX - 12.f, fy - 14.f, 40.f, 28.f);
+        c.fillRoundRect({faderX + 4.f, fy, 14.f, std::max(0.f, faderBot - fy)}, 3.f, Color::argb(0xFF5C4318));
+        goldCap(c, faderX - 14.f, fy - 16.f, 50.f, 34.f);
         const char* marks[] = {"+6", "0", "-6", "-12", "-24", "-48"};
         const float markDb[] = {6, 0, -6, -12, -24, -48};
         for (int m = 0; m < 6; ++m) {
@@ -846,7 +850,7 @@ void deviceChain(Canvas& c, const Frame& f) {
     panelBox(c, mod, 10.f);
     c.fillRect({mod.x, mod.y, mod.w, 36.f}, Color::argb(0xFF1C1814));
     c.drawText("MODULATION", mod.x + 16.f, mod.y + 8.f, 18.f, rod(), true);
-    c.drawText("LFO", mod.x + 16.f, mod.y + 48.f, 18.f, ink(), true);
+    c.drawText("LFO  to  Filter Cutoff", mod.x + 16.f, mod.y + 48.f, 18.f, ink(), true);
     drawLfo(c, {mod.x + 16.f, mod.y + 76.f, mod.w - 32.f, 64.f});
     darkKnob(c, mod.x + 56.f, mod.y + 200.f, 48.f, 0.42f, "Rate", "1/8");
     darkKnob(c, mod.x + 160.f, mod.y + 200.f, 48.f, 0.65f, "Depth", "65%");
@@ -1008,6 +1012,7 @@ void browser(Canvas& c, const Frame& f) {
 void pluginWindow(Canvas& c, const Frame& f) {
     const float w = static_cast<float>(c.width());
     const float h = static_cast<float>(c.height());
+    c.strokeRect({10.f, kBarH + 4.f, w - 20.f, h - kBarH - 14.f}, gold(), 1.5f);
     c.drawText("GHOVLZ! DAW", 36.f, kBarH + 8.f, 28.f, gold(), true);
     c.drawText("Visual language", 36.f, kBarH + 42.f, 18.f, dim(), false);
     Rect palette{28.f, kBarH + 70.f, w - 56.f, 168.f};

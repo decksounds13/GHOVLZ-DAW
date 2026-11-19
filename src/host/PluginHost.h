@@ -22,6 +22,16 @@ public:
     void setState(Device& device, const std::string& encoded);
     std::string stateOf(const Device& device) const;
 
+    struct EditorAttach {
+        int width = 0;
+        int height = 0;
+        bool open = false;
+    };
+    // HOST-07. Asks the plugin for an IPlugView, checks the platform, and calls attached().
+    // The view stores the parent. It does not create a native child window.
+    bool openEditor(Device& device, void* parent, EditorAttach& out, std::string& error);
+    void closeEditor(Device& device);
+
 private:
     std::string scanner_;
     std::string blacklist_;

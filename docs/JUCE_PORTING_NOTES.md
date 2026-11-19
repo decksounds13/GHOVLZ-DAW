@@ -110,7 +110,7 @@ A VST3 plugin in this tree is a `MODULE` from `smtg_add_vst3plugin`, linked to `
 
 Still required for a real product plugin, and not built here:
 
-- A `IPlugView` editor. The test gain plugin has no view. The DAW draws a generic knob page from the parameter list. A ported EQ editor would implement `IPlugView` on top of `Canvas`, or draw into a child HWND with Direct2D.
+- `IPlugView` embed (HOST-07). The test gain plugin returns a 480×300 view. The host calls `createView`, checks HWND or X11, then `attached` / `removed`. The view stores the parent. It does not create a native child window yet, so a ported EQ editor still needs to paint into that parent (Canvas, or a child HWND with Direct2D).
 - CMake install/signing, and a decision about the VST3 SDK license on anything shipped outside the company.
 - CLAP, if that format is required: an entry point, parameters, and state. `ClapHost` on the host side is still a stub.
 - A factory UID, bus layout, and `setBusArrangements` that match what the host activates. The gain plugin uses `SingleComponentEffect` and stereo buses.
