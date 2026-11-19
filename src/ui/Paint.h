@@ -8,7 +8,7 @@
 namespace ghovlz {
 
 class Engine;
-class Project;
+struct Project;
 class WidgetLayer;
 
 enum class View { Arrangement, Session, Perform, Mixer, Device, Piano, Browser, Plugin, Prefs };

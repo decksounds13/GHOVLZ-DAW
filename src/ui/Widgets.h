@@ -11,7 +11,7 @@
 namespace ghovlz {
 
 class Engine;
-class Project;
+struct Project;
 class ThemeProvider;
 struct Frame;
 
