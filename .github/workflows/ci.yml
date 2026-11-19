@@ -64,13 +64,13 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build pkg-config libasound2-dev libx11-dev ninja-build
+          sudo apt-get install -y ninja-build pkg-config libasound2-dev libx11-dev xvfb
       - name: Configure
         run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DGHOVLZ_SANITIZER=ON -DGHOVLZ_SANITIZER_KIND=address,undefined -DGHOVLZ_RT_ABORT=ON
       - name: Build tests
         run: cmake --build build --target GhovlzTests
       - name: Test
-        run: ./build/bin/DEBUG/GhovlzTests
+        run: xvfb-run -a ./build/bin/DEBUG/GhovlzTests
 
   linux-tsan:
     runs-on: ubuntu-latest
@@ -78,10 +78,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y ninja-build pkg-config libasound2-dev libx11-dev
+        run: sudo apt-get update && sudo apt-get install -y ninja-build pkg-config libasound2-dev libx11-dev xvfb
       - name: Configure
         run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DGHOVLZ_SANITIZER=ON -DGHOVLZ_SANITIZER_KIND=thread -DGHOVLZ_RT_ABORT=OFF
       - name: Build tests
         run: cmake --build build --target GhovlzTests
       - name: Test
-        run: ./build/bin/DEBUG/GhovlzTests
+        run: xvfb-run -a ./build/bin/DEBUG/GhovlzTests
