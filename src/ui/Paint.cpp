@@ -153,15 +153,18 @@ void miniKnob(Canvas& c, float cx, float cy, float radius, float norm) {
 
 void darkKnob(Canvas& c, float cx, float cy, float diameter, float norm, const std::string& label, const std::string& value) {
     norm = std::clamp(norm, 0.f, 1.f);
+    // The filmstrip frame is 220 px with the disc inset to about 171 px.
+    // `diameter` is the visible disc, so a 48 px knob is actually 48 px.
+    const float frame = diameter * (220.f / 171.f);
     const float rad = diameter * 0.5f;
     c.dropShadow({cx - rad, cy - rad + 2.f, diameter, diameter}, rad, 6.f, Color{0, 0, 0, 170});
     const Image& film = knobFilm();
     const int frameSize = film.w > 0 ? film.w : 220;
     const int frames = film.w > 0 ? std::max(1, film.h / frameSize) : 1;
     if (film.w > 0) {
-        const int frame = std::clamp(static_cast<int>(std::lround(norm * (frames - 1))), 0, frames - 1);
-        c.drawImage(film, {0, static_cast<float>(frame * frameSize), static_cast<float>(frameSize), static_cast<float>(frameSize)},
-                    {cx - rad, cy - rad, diameter, diameter});
+        const int frameIndex = std::clamp(static_cast<int>(std::lround(norm * (frames - 1))), 0, frames - 1);
+        c.drawImage(film, {0, static_cast<float>(frameIndex * frameSize), static_cast<float>(frameSize), static_cast<float>(frameSize)},
+                    {cx - frame * 0.5f, cy - frame * 0.5f, frame, frame});
     } else {
         c.fillEllipse(cx, cy, rad, rad, active().color(Role::Knob));
         c.innerShadow({cx - rad, cy - rad, diameter, diameter}, 8.f, Color{0, 0, 0, 160});
@@ -187,12 +190,14 @@ void knob(Canvas& c, float cx, float cy, float norm, const std::string& label, c
 
 void goldCap(Canvas& c, float x, float y, float w, float h) {
     Rect r{x, y, w, h};
-    c.dropShadow(r, 3.f, 4.f, Color{0, 0, 0, 160});
-    c.fillRoundRect(r, 3.f, Color::argb(0xFF7A5A22));
-    c.fillRoundRect({r.x + 1.f, r.y + 1.f, r.w - 2.f, r.h * 0.42f}, 2.f, Color::argb(0xFFE6C56A));
-    c.fillRect({r.x + 3.f, r.y + r.h * 0.46f, r.w - 6.f, 2.f}, Color::argb(0xFF4A3414));
-    c.fillRoundRect({r.x + 1.f, r.y + r.h * 0.55f, r.w - 2.f, r.h * 0.38f}, 2.f, Color::argb(0xFFB49637));
-    c.innerShadow(r, 3.f, Color{0, 0, 0, 80});
+    c.dropShadow(r, 4.f, 6.f, Color{0, 0, 0, 180});
+    c.fillRoundRect(r, 4.f, Color::argb(0xFF5A4014));
+    c.fillRoundRect({r.x + 1.f, r.y + 1.f, r.w - 2.f, r.h * 0.48f}, 3.f, Color::argb(0xFFF0D078));
+    c.fillRect({r.x + 2.f, r.y + 2.f, r.w - 4.f, 3.f}, Color::argb(0xFFFFF2C8));
+    c.fillRect({r.x + 3.f, r.y + r.h * 0.46f, r.w - 6.f, 2.f}, Color::argb(0xFF3A280C));
+    c.fillRoundRect({r.x + 1.f, r.y + r.h * 0.52f, r.w - 2.f, r.h * 0.42f}, 3.f, Color::argb(0xFFB49637));
+    c.fillRect({r.x + 2.f, r.y + r.h - 4.f, r.w - 4.f, 2.f}, Color::argb(0xFF6A4E1C));
+    c.innerShadow(r, 4.f, Color{0, 0, 0, 90});
 }
 
 void playGlyph(Canvas& c, float x, float y, float s, Color col) {
@@ -448,12 +453,13 @@ void arrangement(Canvas& c, const Frame& f) {
         const float y = rowsTop + static_cast<float>(i) * rowH;
         c.fillRect({headerX, y, headerW, rowH - 1.f}, i % 2 ? Color::argb(0xFF120F0D) : Color::argb(0xFF161311));
         c.fillRect({headerX, y, 6.f, rowH - 1.f}, Color::argb(t->color));
-        c.drawText(t->name, headerX + 12.f, y + 4.f, 18.f, ink(), true);
-        drawStereo(c, f, t->id, {headerX + headerW - 20.f, y + 4.f, 16.f, std::max(16.f, rowH - 8.f)}, 0.62f);
-        const float pillY = y + std::max(26.f, rowH - 28.f);
-        pill(c, {headerX + 12.f, pillY, 30.f, 22.f}, "M", t->mute);
-        pill(c, {headerX + 46.f, pillY, 30.f, 22.f}, "S", t->solo);
-        pill(c, {headerX + 80.f, pillY, 48.f, 22.f}, "Arm", t->arm);
+        c.drawText(t->name, headerX + 12.f, y + 2.f, 18.f, ink(), true);
+        drawStereo(c, f, t->id, {headerX + headerW - 12.f, y + 4.f, 8.f, std::max(16.f, rowH - 8.f)}, 0.62f);
+        const float pillH = 32.f;
+        const float pillY = y + rowH - pillH - 4.f;
+        pill(c, {headerX + 10.f, pillY, 40.f, pillH}, "M", t->mute);
+        pill(c, {headerX + 54.f, pillY, 40.f, pillH}, "S", t->solo);
+        pill(c, {headerX + 98.f, pillY, 48.f, pillH}, "Arm", t->arm);
 
         const Rect lane{laneX, y, laneR - laneX, std::max(1.f, rowH - 2.f)};
         c.fillRect({laneX, y, laneR - laneX, rowH - 1.f}, Color::argb(0xFF0C0B0A));
@@ -487,18 +493,21 @@ void arrangement(Canvas& c, const Frame& f) {
                     vmax = std::max(vmax, pt.value);
                 }
                 const float spanV = std::max(0.001f, vmax - vmin);
-                const float y0 = y + 6.f;
-                const float y1 = y + rowH - 8.f;
+                const float xL = laneX + 6.f;
+                const float xR = laneR - 6.f;
+                const float y0 = y + 24.f;
+                const float y1 = y + rowH - 16.f;
                 auto yOf = [&](float v) {
                     const float tnorm = std::clamp((v - vmin) / spanV, 0.f, 1.f);
-                    return std::clamp(y0 + (1.f - tnorm) * std::max(4.f, y1 - y0), y + 4.f, y + rowH - 6.f);
+                    return std::clamp(y0 + (1.f - tnorm) * std::max(4.f, y1 - y0), y0, y1);
                 };
+                auto xOf = [&](double q) { return std::clamp(xAt(q), xL, xR); };
                 const std::string label = autoLane.id.substr(prefix.size());
-                c.drawText(label == "cutoff" ? "Filter Cutoff" : label, laneX + 8.f, y + 4.f, 18.f, rod(), false);
-                float px = std::clamp(xAt(autoLane.points.front().quarter), laneX, laneR);
+                c.drawText(label == "cutoff" ? "Filter Cutoff" : label, xL, y + 2.f, 18.f, rod(), false);
+                float px = xOf(autoLane.points.front().quarter);
                 float py = yOf(autoLane.points.front().value);
                 for (size_t p = 1; p < autoLane.points.size(); ++p) {
-                    const float nx = std::clamp(xAt(autoLane.points[p].quarter), laneX, laneR);
+                    const float nx = xOf(autoLane.points[p].quarter);
                     const float ny = yOf(autoLane.points[p].value);
                     c.line(px, py, nx, ny, amber(), 2.f);
                     px = nx;
@@ -510,8 +519,8 @@ void arrangement(Canvas& c, const Frame& f) {
         c.resetClip();
 
         c.fillRect({laneR, y, rightW, rowH - 1.f}, Color::argb(0xFF120F0D));
-        miniKnob(c, laneR + 22.f, y + rowH * 0.42f, 14.f, (t->pan + 1.f) * 0.5f);
-        drawStereo(c, f, t->id, {laneR + rightW - 22.f, y + 8.f, 14.f, rowH - 18.f}, 0.4f);
+        darkKnob(c, laneR + 28.f, y + rowH * 0.42f, 28.f, (t->pan + 1.f) * 0.5f, "", "");
+        drawStereo(c, f, t->id, {laneR + rightW - 18.f, y + 8.f, 10.f, rowH - 18.f}, 0.4f);
     }
     c.fillRoundRect({hx - 22.f, rulerY + 18.f, 52.f, 16.f}, 3.f, gold());
     c.drawText(flag, hx - 18.f, rulerY + 19.f, 12.f, Color::argb(0xFF1A120C), true);
@@ -532,10 +541,10 @@ void arrangement(Canvas& c, const Frame& f) {
             for (const auto& pr : d.params) {
                 if (shown >= 3)
                     break;
-                const float cxk = r.x + 40.f + static_cast<float>(shown) * 78.f;
-                if (cxk + 24.f > r.x + r.w - 20.f)
+                const float cxk = r.x + 52.f + static_cast<float>(shown) * 86.f;
+                if (cxk + 28.f > r.x + r.w - 8.f)
                     break;
-                darkKnob(c, cxk, r.y + 70.f, 48.f, knobNorm(pr.second), pr.first, paramText(pr.second));
+                darkKnob(c, cxk, r.y + 86.f, 48.f, knobNorm(pr.second), pr.first, paramText(pr.second));
                 ++shown;
             }
             if (i + 1 < chain->devices.size())
@@ -715,13 +724,13 @@ void mixer(Canvas& c, const Frame& f) {
         const float faderBot = r.y + r.h - 72.f;
         const float faderX = r.x + 46.f;
         const float faderH = std::max(40.f, faderBot - faderTop);
-        Rect well{faderX, faderTop, 14.f, faderH};
+        Rect well{faderX, faderTop, 16.f, faderH};
         c.fillRoundRect(well, 4.f, Color::argb(0xFF1A1614));
         c.innerShadow(well, 4.f, Color{0, 0, 0, 180});
         const float fn = dbNorm(t->volumeDb);
         const float fy = faderBot - fn * faderH;
-        c.fillRoundRect({faderX + 3.f, fy, 8.f, std::max(0.f, faderBot - fy)}, 2.f, Color::argb(0xFF5C4318));
-        goldCap(c, faderX - 8.f, fy - 12.f, 30.f, 22.f);
+        c.fillRoundRect({faderX + 3.f, fy, 10.f, std::max(0.f, faderBot - fy)}, 2.f, Color::argb(0xFF5C4318));
+        goldCap(c, faderX - 12.f, fy - 14.f, 40.f, 28.f);
         const char* marks[] = {"+6", "0", "-6", "-12", "-24", "-48"};
         const float markDb[] = {6, 0, -6, -12, -24, -48};
         for (int m = 0; m < 6; ++m) {

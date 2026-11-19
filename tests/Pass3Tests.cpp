@@ -431,20 +431,36 @@ TEST_CASE("arrangement clips and automation stay inside their lane") {
     };
     int amber = 0;
     int body = 0;
+    int escaped = 0;
     const int kickY = static_cast<int>(rowsTop + rowH * 0.55f);
+    const float padsTop = rowsTop + static_cast<float>(pads) * rowH;
     for (int y = static_cast<int>(rowsTop); y < static_cast<int>(rowsBot); ++y) {
-        for (int x = static_cast<int>(laneX); x < static_cast<int>(laneR); x += 2) {
+        for (int x = static_cast<int>(laneX); x < 1680; x += 2) {
             const uint8_t* p = px + (y * 1680 + x) * 4;
-            if (p[0] == 0xFF && p[1] == 0x82 && p[2] == 0x1E) {
-                REQUIRE((inLane(y, lead) || inLane(y, pads)));
-                ++amber;
+            if (p[0] != 0xFF || p[1] != 0x82 || p[2] != 0x1E)
+                continue;
+            if (x >= static_cast<int>(laneR)) {
+                ++escaped;
+                continue;
             }
-            if (y == kickY && x > laneX + 30 && x < laneX + 200 && p[0] > 70)
-                ++body;
+            REQUIRE((inLane(y, lead) || inLane(y, pads)));
+            if (inLane(y, pads)) {
+                REQUIRE(y > static_cast<int>(padsTop) + 8);
+                REQUIRE(y < static_cast<int>(padsTop + rowH) - 8);
+            }
+            ++amber;
+        }
+        if (y == kickY) {
+            for (int x = static_cast<int>(laneX) + 30; x < static_cast<int>(laneX) + 200; x += 2) {
+                const uint8_t* p = px + (y * 1680 + x) * 4;
+                if (p[0] > 70)
+                    ++body;
+            }
         }
     }
     REQUIRE(amber > 20);
     REQUIRE(body > 10);
+    REQUIRE(escaped == 0);
 }
 
 TEST_CASE("moduleinfo is scanned without loading and a hang is blacklisted") {
