@@ -22,7 +22,16 @@ inline void rtLeave() {
 }
 inline bool rtGuardActive() { return rtDepth > 0; }
 
+// Tests that deliberately touch a UI-only object from a fake audio scope
+// raise this so GHOVLZ_RT_ABORT still counts the hit and does not abort.
+inline thread_local int rtGuardSilence = 0;
+
 void rtGuardHit(const char* why);
+
+struct RtGuardSilence {
+    RtGuardSilence() { ++rtGuardSilence; }
+    ~RtGuardSilence() { --rtGuardSilence; }
+};
 
 struct RtScope {
     RtScope() { rtEnter(); }

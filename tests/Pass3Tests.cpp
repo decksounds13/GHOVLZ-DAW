@@ -391,6 +391,28 @@ TEST_CASE("paint scale matches the 100 percent hit targets") {
     REQUIRE(scaled[0] == 255);
 }
 
+TEST_CASE("arrangement clips stay inside their lane") {
+    Project project = Project::makeShowcase();
+    auto canvas = makeSoftwareCanvas(1680, 980);
+    Frame frame;
+    frame.project = &project;
+    frame.view = View::Arrangement;
+    paintFrame(*canvas, frame);
+    const uint8_t* px = softwarePixels(*canvas);
+    int hits = 0;
+    for (int y = 0; y < 980; ++y) {
+        for (int x = 344; x < 1500; x += 4) {
+            const uint8_t* p = px + (y * 1680 + x) * 4;
+            if (p[0] == 0x1A && p[1] == 0x14 && p[2] == 0x10) {
+                REQUIRE(y >= 94);
+                REQUIRE(y < 980 - 176);
+                ++hits;
+            }
+        }
+    }
+    REQUIRE(hits > 20);
+}
+
 TEST_CASE("moduleinfo is scanned without loading and a hang is blacklisted") {
     const fs::path scanner = findUp("GhovlzPluginScan");
     REQUIRE_FALSE(scanner.empty());

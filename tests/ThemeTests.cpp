@@ -86,6 +86,7 @@ TEST_CASE("a theme seed is stable and the audio thread is refused") {
     REQUIRE(a.seed != Theme::fromSeed("43").seed);
     const int before = rtGuardHits().load();
     {
+        RtGuardSilence quiet;
         RtScope audio;
         ThemeProvider provider;
         provider.current();

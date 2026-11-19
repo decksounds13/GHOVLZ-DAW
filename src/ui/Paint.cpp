@@ -171,8 +171,9 @@ void transportButton(Canvas& c, Rect r, bool on) {
 }
 
 void pill(Canvas& c, Rect r, const char* text, bool on) {
-    c.fillRoundRect(r, 3.f, on ? amber() : Color::argb(0xFF2A241E));
-    c.drawText(text, r.x + 4.f, r.y + 1.f, 12.f, on ? Color::argb(0xFF1A120C) : dim(), true);
+    c.fillRoundRect(r, 4.f, on ? gold() : Color::argb(0xFF2A241E));
+    const float size = r.h >= 20.f ? 18.f : std::max(12.f, r.h - 2.f);
+    c.drawText(text, r.x + 4.f, r.y + 1.f, size, on ? Color::argb(0xFF1A120C) : dim(), true);
 }
 
 float dbNorm(float db) { return std::clamp((db + 60.f) / 66.f, 0.f, 1.f); }
@@ -253,7 +254,7 @@ void topBar(Canvas& c, const Frame& f) {
         const bool on = f.view == shown[i];
         c.fillRoundRect(r, 6.f, on ? Color::argb(0xFF3A2E1C) : Color::argb(0xFF161311));
         c.strokeRect(r, on ? gold() : line(), 1.f);
-        c.drawText(views[i], r.x + 14.f, r.y + 7.f, 13.f, on ? rod() : dim(), true);
+        c.drawText(views[i], r.x + 8.f, r.y + 4.f, 18.f, on ? rod() : dim(), true);
     }
 
     const bool playing = f.engine && f.engine->playing();
@@ -277,13 +278,13 @@ void topBar(Canvas& c, const Frame& f) {
     char bpm[32];
     std::snprintf(bpm, sizeof(bpm), "%.2f BPM", f.project ? f.project->bpm : 120.0);
     const std::string pos = positionText(f.engine ? f.engine->playhead() : (f.project ? f.project->playhead : 0));
-    c.drawText(bpm, 760.f, 16.f, 16.f, ink(), true);
+    c.drawText(bpm, 760.f, 14.f, 18.f, ink(), true);
     c.drawText(f.project ? (std::to_string(f.project->numerator) + "/" + std::to_string(f.project->denominator)) : "4/4",
-               890.f, 16.f, 16.f, dim(), false);
-    c.drawText(pos, 960.f, 16.f, 16.f, rod(), true);
+               890.f, 14.f, 18.f, dim(), false);
+    c.drawText(pos, 960.f, 14.f, 18.f, rod(), true);
     char cpu[32];
     std::snprintf(cpu, sizeof(cpu), "CPU %.0f%%", f.engine ? f.engine->cpuLoad() * 100.f : 0.f);
-    c.drawText(cpu, w - 250.f, 16.f, 14.f, dim(), false);
+    c.drawText(cpu, w - 270.f, 14.f, 18.f, dim(), false);
     Rect badge{w - 108.f, 12.f, 92.f, 30.f};
     c.fillRoundRect(badge, 6.f, Color::argb(0xFF1A1614));
     c.strokeRect(badge, gold(), 1.f);
@@ -293,7 +294,7 @@ void topBar(Canvas& c, const Frame& f) {
 void browserColumn(Canvas& c, const Frame& f, float h) {
     c.fillRect({0, kBarH, 156.f, h - kBarH}, Color::argb(0xFF0E0C0B));
     c.fillRect({155, kBarH, 1, h - kBarH}, line());
-    c.drawText("BROWSER", 14.f, kBarH + 12.f, 13.f, dim(), true);
+    c.drawText("BROWSER", 14.f, kBarH + 8.f, 18.f, dim(), true);
     const char* cats[] = {"Sounds", "Drums", "Instruments", "Audio Effects", "MIDI Effects", "Samples", "Plugins"};
     for (int i = 0; i < 7; ++i) {
         Rect r{8.f, kBarH + 40.f + i * 32.f, 140.f, 28.f};
@@ -301,7 +302,7 @@ void browserColumn(Canvas& c, const Frame& f, float h) {
         if (on)
             c.fillRoundRect(r, 4.f, Color::argb(0xFF2A2118));
         c.fillEllipse(20.f, r.y + 14.f, 4.f, 4.f, on ? amber() : Color::argb(0xFF3C3732));
-        c.drawText(cats[i], 32.f, r.y + 6.f, 14.f, on ? ink() : dim(), on);
+        c.drawText(cats[i], 32.f, r.y + 4.f, 18.f, on ? ink() : dim(), on);
     }
 }
 
@@ -358,8 +359,8 @@ void arrangement(Canvas& c, const Frame& f) {
         const Track* t = rows[i];
         const float y = rowsTop + static_cast<float>(i) * rowH;
         c.fillRect({headerX, y, headerW, rowH - 1.f}, i % 2 ? Color::argb(0xFF120F0D) : Color::argb(0xFF161311));
-        c.fillRect({headerX, y, 5.f, rowH - 1.f}, Color::argb(t->color));
-        c.drawText(t->name, headerX + 12.f, y + 6.f, 14.f, ink(), true);
+        c.fillRect({headerX, y, 6.f, rowH - 1.f}, Color::argb(t->color));
+        c.drawText(t->name, headerX + 14.f, y + 4.f, 18.f, ink(), true);
         miniKnob(c, headerX + 28.f, y + rowH * 0.62f, 11.f, dbNorm(t->volumeDb));
         pill(c, {headerX + 48.f, y + rowH * 0.48f, 22.f, 16.f}, "M", t->mute);
         pill(c, {headerX + 74.f, y + rowH * 0.48f, 22.f, 16.f}, "S", t->solo);
@@ -376,7 +377,7 @@ void arrangement(Canvas& c, const Frame& f) {
             c.fillRoundRect(body, 4.f, Color::argb(0xFF1A1410));
             c.fillRect({body.x, body.y, 3.f, body.h}, Color::argb(clip.color ? clip.color : t->color));
             c.fillRect({body.x, body.y, body.w, 16.f}, Color::argb(0xCC2A2118));
-            c.drawText(clip.name.empty() ? t->name : clip.name, body.x + 8.f, body.y + 1.f, 12.f, ink(), true);
+            c.drawText(clip.name.empty() ? t->name : clip.name, body.x + 8.f, body.y + 1.f, 18.f, ink(), true);
             Rect content{body.x + 2.f, body.y + 18.f, body.w - 4.f, body.h - 22.f};
             if (!clip.notes.empty())
                 drawNotes(c, clip, content);
@@ -440,8 +441,10 @@ void arrangement(Canvas& c, const Frame& f) {
                 if (cxk > r.x + r.w - 50.f)
                     break;
                 const float norm = knobNorm(pr.second);
-                miniKnob(c, cxk, r.y + 78.f, 16.f, norm);
-                c.drawText(pr.first, cxk - 22.f, r.y + 100.f, 12.f, dim(), false);
+                miniKnob(c, cxk, r.y + 72.f, 18.f, norm);
+                c.drawText(pr.first, cxk - 24.f, r.y + 96.f, 18.f, dim(), false);
+                if (i + 1 < chain->devices.size())
+                    c.line(r.x + r.w, r.y + r.h * 0.5f, r.x + r.w + 10.f, r.y + r.h * 0.5f, gold(), 2.f);
                 ++shown;
             }
         }
@@ -453,62 +456,102 @@ void session(Canvas& c, const Frame& f) {
     const float h = static_cast<float>(c.height());
     if (!f.project)
         return;
-    const float sceneW = 120.f;
-    const float top = kBarH + 16.f;
+    const float left = 168.f;
+    const float mixerH = 168.f;
+    const float sceneW = 118.f;
+    const float top = kBarH + 36.f;
     const float sceneX = w - sceneW - 10.f;
-    std::vector<const Track*> rows;
+    std::vector<const Track*> cols;
     for (const auto& t : f.project->tracks)
         if (t.type == TrackType::Audio || t.type == TrackType::Midi)
-            rows.push_back(&t);
-    const float rowPitch = (h - top - 12.f) / std::max<size_t>(1, rows.size());
-    const float rowH = rowPitch - 6.f;
-    const float colW = (sceneX - 240.f) / 8.f;
-    for (size_t i = 0; i < rows.size(); ++i) {
-        const Track* t = rows[i];
-        const float y = top + static_cast<float>(i) * rowPitch;
-        c.fillRect({164.f, y, 4.f, rowH}, Color::argb(t->color));
-        c.drawText(t->name, 176.f, y + 8.f, 14.f, ink(), true);
-        for (int s = 0; s < 8; ++s) {
-            Rect cell{230.f + s * colW, y, colW - 6.f, rowH};
-            c.fillRoundRect(cell, 4.f, Color::argb(0xFF161311));
-            if (s < static_cast<int>(t->slots.size()) && t->slots[static_cast<size_t>(s)]) {
+            cols.push_back(&t);
+    const int nScenes = std::max(1, std::min(8, static_cast<int>(f.project->scenes.size())));
+    const float colW = (sceneX - left - 8.f) / std::max<size_t>(1, cols.size());
+    const float rowH = (h - mixerH - top) / static_cast<float>(nScenes);
+    c.drawText("SESSION", left, kBarH + 8.f, 18.f, dim(), true);
+    for (size_t i = 0; i < cols.size(); ++i) {
+        const Track* t = cols[i];
+        const float x = left + static_cast<float>(i) * colW;
+        c.fillRect({x, top - 28.f, colW - 6.f, 24.f}, Color::argb(0xFF161311));
+        c.fillRect({x, top - 28.f, 6.f, 24.f}, Color::argb(t->color));
+        c.drawText(t->name, x + 10.f, top - 26.f, 18.f, ink(), true);
+        for (int s = 0; s < nScenes; ++s) {
+            Rect cell{x, top + static_cast<float>(s) * rowH, colW - 6.f, rowH - 4.f};
+            const bool filled = s < static_cast<int>(t->slots.size()) && t->slots[static_cast<size_t>(s)];
+            const bool playing = filled && s == f.sessionScene;
+            c.clip(cell);
+            c.fillRoundRect(cell, 4.f, filled ? Color::argb(0xFF1C1814) : Color::argb(0xFF100E0C));
+            if (filled) {
                 const Clip& clip = *t->slots[static_cast<size_t>(s)];
-                c.fillRect({cell.x, cell.y, 3.f, cell.h}, Color::argb(clip.color ? clip.color : t->color));
-                c.drawText(clip.name, cell.x + 8.f, cell.y + 4.f, 12.f, ink(), true);
-                drawWave(c, mediaOf(f.project, clip.mediaId), {cell.x + 4.f, cell.y + 20.f, cell.w - 8.f, cell.h - 26.f},
-                         waveTint(t->color));
+                const Color tint = Color::argb(clip.color ? clip.color : t->color);
+                c.fillRect({cell.x, cell.y, cell.w, 4.f}, tint);
+                c.drawText(clip.name.empty() ? t->name : clip.name, cell.x + 6.f, cell.y + 6.f, 18.f, ink(), true);
+                Rect wave{cell.x + 4.f, cell.y + 26.f, cell.w - 8.f, std::max(4.f, cell.h - 32.f)};
                 if (!clip.notes.empty())
-                    drawNotes(c, clip, {cell.x + 4.f, cell.y + 20.f, cell.w - 8.f, cell.h - 26.f});
+                    drawNotes(c, clip, wave);
+                else
+                    drawWave(c, mediaOf(f.project, clip.mediaId), wave, waveTint(t->color));
             }
+            if (playing)
+                c.strokeRect(cell, gold(), 2.f);
+            c.resetClip();
         }
+        Rect mix{x, h - mixerH + 8.f, colW - 6.f, mixerH - 16.f};
+        c.fillRoundRect(mix, 6.f, Color::argb(0xFF120F0D));
+        miniKnob(c, mix.x + 22.f, mix.y + 28.f, 14.f, dbNorm(t->volumeDb));
+        c.drawText(t->name, mix.x + 40.f, mix.y + 8.f, 18.f, ink(), true);
+        drawStereo(c, f, t->id, {mix.x + mix.w - 22.f, mix.y + 12.f, 14.f, mix.h - 24.f}, 0.4f);
     }
-    for (int s = 0; s < static_cast<int>(f.project->scenes.size()) && s < 8; ++s) {
-        Rect r{sceneX, top + static_cast<float>(s) * ((h - top - 12.f) / 8.f), sceneW, (h - top - 12.f) / 8.f - 6.f};
-        c.fillRoundRect(r, 6.f, Color::argb(0xFF1C1814));
-        c.strokeRect(r, s == 3 ? gold() : line(), 1.4f);
-        c.drawText(f.project->scenes[static_cast<size_t>(s)], r.x + 12.f, r.y + r.h * 0.35f, 15.f, ink(), true);
+    for (int s = 0; s < nScenes; ++s) {
+        Rect r{sceneX, top + static_cast<float>(s) * rowH, sceneW, rowH - 4.f};
+        const bool on = s == f.sessionScene;
+        c.fillRoundRect(r, 6.f, on ? Color::argb(0xFF3A2E1C) : Color::argb(0xFF1C1814));
+        c.strokeRect(r, on ? gold() : line(), on ? 2.f : 1.f);
+        c.drawText(f.project->scenes[static_cast<size_t>(s)], r.x + 10.f, r.y + r.h * 0.35f, 18.f, on ? rod() : ink(), true);
     }
 }
 
 void perform(Canvas& c, const Frame& f) {
     const float w = static_cast<float>(c.width());
     const float h = static_cast<float>(c.height());
-    c.drawText("PERFORMANCE", 170.f, kBarH + 12.f, 16.f, dim(), true);
-    const char* names[] = {"Intro", "Verse", "Build", "Drop", "Break", "Drop 2", "Outro", "End",
-                           "Kick", "Drums", "Snare", "Bass", "Lead", "Pads", "Vox", "FX",
-                           "Filter", "Wash", "Chop", "Stutter", "Rise", "Impact", "Tape", "Space"};
+    const float side = 220.f;
+    c.drawText("PERFORM", 170.f, kBarH + 8.f, 18.f, dim(), true);
+    const char* names[] = {
+        "Intro", "Verse", "Build", "Drop", "Break", "Drop 2", "Outro", "End",
+        "Kick", "Drums", "Snare", "Hat", "Bass", "Lead", "Pads", "Vox",
+        "Filter", "Wash", "Chop", "Stutter", "Rise", "Impact", "Tape", "Space",
+        "Delay", "Verb", "Drive", "Width", "Gate", "Side", "Duck", "Air",
+        "Scene A", "Scene B", "Scene C", "Scene D", "Loop", "Fill", "Hit", "Riser",
+        "Macro 1", "Macro 2", "Macro 3", "Macro 4", "Macro 5", "Macro 6", "Macro 7", "Macro 8"};
     const int cols = 8;
-    const float padW = (w - 180.f) / cols;
-    const float padH = (h - kBarH - 56.f) / 3.f;
-    for (int i = 0; i < 24; ++i) {
+    const int rows = 6;
+    const float padW = (w - side - 180.f) / cols;
+    const float padH = (h - kBarH - 48.f) / rows;
+    for (int i = 0; i < cols * rows; ++i) {
         const int col = i % cols;
         const int row = i / cols;
-        Rect r{168.f + col * padW, kBarH + 44.f + row * padH, padW - 8.f, padH - 8.f};
+        Rect r{168.f + col * padW, kBarH + 36.f + row * padH, padW - 6.f, padH - 6.f};
         const bool on = i == 3;
-        c.fillRoundRect(r, 8.f, on ? Color::argb(0xFF3A2A16) : Color::argb(0xFF161311));
+        c.fillRoundRect(r, 6.f, on ? Color::argb(0xFF3A2A16) : Color::argb(0xFF161311));
         c.strokeRect(r, on ? gold() : line(), on ? 2.f : 1.f);
-        c.drawText(names[i], r.x + 12.f, r.y + r.h * 0.4f, 16.f, on ? rod() : ink(), true);
+        c.drawText(names[i], r.x + 8.f, r.y + r.h * 0.35f, 18.f, on ? rod() : ink(), true);
     }
+    const float sx = w - side + 8.f;
+    c.drawText("SCENES", sx, kBarH + 8.f, 18.f, dim(), true);
+    for (int s = 0; s < 8; ++s) {
+        Rect r{sx, kBarH + 36.f + s * 36.f, side - 24.f, 30.f};
+        const bool on = f.sessionScene == s;
+        c.fillRoundRect(r, 4.f, on ? Color::argb(0xFF3A2E1C) : Color::argb(0xFF161311));
+        c.strokeRect(r, on ? gold() : line(), 1.f);
+        c.drawText(names[s], r.x + 8.f, r.y + 4.f, 18.f, on ? rod() : ink(), true);
+    }
+    const float macroY = kBarH + 36.f + 8 * 36.f + 8.f;
+    c.drawText("MACROS", sx, macroY, 18.f, dim(), true);
+    for (int m = 0; m < 8; ++m)
+        miniKnob(c, sx + 16.f + (m % 4) * 48.f, macroY + 36.f + (m / 4) * 48.f, 14.f, 0.35f + m * 0.05f);
+    Rect xf{sx, h - 48.f, side - 24.f, 18.f};
+    c.fillRoundRect(xf, 4.f, Color::argb(0xFF1A1614));
+    c.fillRect({xf.x + xf.w * 0.45f, xf.y, 8.f, xf.h}, gold());
 }
 
 void mixer(Canvas& c, const Frame& f) {
@@ -607,9 +650,16 @@ void deviceChain(Canvas& c, const Frame& f) {
 void piano(Canvas& c, const Frame& f) {
     const float w = static_cast<float>(c.width());
     const float h = static_cast<float>(c.height());
-    const float keyW = 54.f;
-    const float top = kBarH + 28.f;
-    c.drawText("PIANO ROLL", 16.f, kBarH + 6.f, 14.f, dim(), true);
+    const float keyW = 72.f;
+    const float velH = 72.f;
+    const float top = kBarH + 56.f;
+    const char* tools[] = {"Draw", "Select", "Grid", "Scale"};
+    for (int i = 0; i < 4; ++i) {
+        Rect r{16.f + i * 88.f, kBarH + 8.f, 80.f, 28.f};
+        c.fillRoundRect(r, 4.f, i == 0 ? Color::argb(0xFF3A2E1C) : Color::argb(0xFF161311));
+        c.strokeRect(r, i == 0 ? gold() : line(), 1.f);
+        c.drawText(tools[i], r.x + 8.f, r.y + 4.f, 18.f, i == 0 ? rod() : ink(), true);
+    }
     const Clip* clip = nullptr;
     if (f.project) {
         for (const auto& t : f.project->tracks) {
@@ -617,25 +667,45 @@ void piano(Canvas& c, const Frame& f) {
                 clip = &t.clips.front();
         }
     }
-    for (int p = 0; p < 24; ++p) {
+    const int rows = 24;
+    const float rowH = (h - top - velH) / rows;
+    static const char* names[] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
+    for (int bar = 0; bar < 16; ++bar) {
+        const float x = keyW + bar * 48.f;
+        c.drawText(std::to_string(bar + 1), x + 4.f, kBarH + 36.f, 18.f, dim(), false);
+        c.line(x, top, x, h - velH, line(), bar % 4 == 0 ? 1.4f : 1.f);
+    }
+    const double head = f.engine ? f.engine->playhead() : (f.project ? f.project->playhead : 8);
+    const float hx = keyW + static_cast<float>(head) * 12.f;
+    for (int p = 0; p < rows; ++p) {
         const int pitch = 72 - p;
-        const float y = top + p * ((h - top - 12.f) / 24.f);
-        const bool black = pitch % 12 == 1 || pitch % 12 == 3 || pitch % 12 == 6 || pitch % 12 == 8 || pitch % 12 == 10;
-        c.fillRect({0, y, keyW, (h - top) / 24.f - 1.f}, black ? Color::argb(0xFF1A1614) : Color::argb(0xFFD1BCAC));
-        c.fillRect({keyW, y, w - keyW, (h - top) / 24.f - 1.f}, black ? Color::argb(0xFF100E0C) : Color::argb(0xFF161311));
-        if (pitch % 12 == 0) {
-            char name[8];
-            std::snprintf(name, sizeof(name), "C%d", pitch / 12 - 1);
-            c.drawText(name, 8.f, y + 2.f, 12.f, Color::argb(0xFF1A120C), true);
-        }
+        const float y = top + p * rowH;
+        const int pc = pitch % 12;
+        const bool black = pc == 1 || pc == 3 || pc == 6 || pc == 8 || pc == 10;
+        c.fillRect({0, y, keyW, rowH - 1.f}, black ? Color::argb(0xFF1A1614) : Color::argb(0xFFD1BCAC));
+        c.fillRect({keyW, y, w - keyW, rowH - 1.f}, black ? Color::argb(0xFF100E0C) : Color::argb(0xFF161311));
+        char label[8];
+        std::snprintf(label, sizeof(label), "%s%d", names[pc], pitch / 12 - 1);
+        c.drawText(label, 6.f, y + 1.f, 18.f, black ? Color::argb(0xFFD1BCAC) : Color::argb(0xFF1A120C), true);
         if (clip) {
             for (const auto& n : clip->notes) {
                 if (n.pitch != pitch)
                     continue;
                 const float x = keyW + 8.f + static_cast<float>(n.startQ) * 28.f;
                 const float nw = std::max(8.f, static_cast<float>(n.lengthQ) * 28.f);
-                c.fillRoundRect({x, y + 3.f, nw, (h - top) / 24.f - 7.f}, 3.f, gold());
+                c.fillRoundRect({x, y + 2.f, nw, rowH - 4.f}, 3.f, gold());
             }
+        }
+    }
+    c.line(hx, top, hx, h - velH, rod(), 1.6f);
+    c.fillRoundRect({hx - 16.f, top - 16.f, 40.f, 16.f}, 3.f, gold());
+    c.fillRect({0, h - velH, w, velH}, Color::argb(0xFF0E0C0B));
+    c.drawText("Velocity", 8.f, h - velH + 8.f, 18.f, dim(), true);
+    if (clip) {
+        for (const auto& n : clip->notes) {
+            const float x = keyW + 8.f + static_cast<float>(n.startQ) * 28.f;
+            const float vh = std::max(4.f, n.velocity * (velH - 28.f));
+            c.fillRect({x, h - 8.f - vh, 10.f, vh}, amber());
         }
     }
 }
@@ -644,13 +714,41 @@ void browser(Canvas& c, const Frame& f) {
     const float w = static_cast<float>(c.width());
     const float h = static_cast<float>(c.height());
     browserColumn(c, f, h);
-    c.drawText("Sounds", 180.f, kBarH + 16.f, 20.f, ink(), true);
+    Rect search{176.f, kBarH + 10.f, 420.f, 32.f};
+    c.fillRoundRect(search, 6.f, Color::argb(0xFF161311));
+    c.strokeRect(search, line(), 1.f);
+    c.drawText(f.search.empty() ? "Search" : f.search, search.x + 12.f, search.y + 6.f, 18.f,
+               f.search.empty() ? dim() : ink(), false);
+    c.drawText("Name", 180.f, kBarH + 52.f, 18.f, dim(), true);
+    c.drawText("Tags", 520.f, kBarH + 52.f, 18.f, dim(), true);
+    c.drawText("Duration", 760.f, kBarH + 52.f, 18.f, dim(), true);
     const char* items[] = {"Warm Pad", "Analog Bass", "Dusty Kick", "Room Snare", "Tape Lead", "Vinyl Hat"};
+    const char* tags[] = {"Pad", "Bass", "Drum", "Drum", "Lead", "Hat"};
+    const char* durs[] = {"0:08", "0:04", "0:01", "0:01", "0:06", "0:01"};
     for (int i = 0; i < 6; ++i) {
-        Rect r{180.f, kBarH + 56.f + i * 48.f, w - 200.f, 40.f};
+        Rect r{176.f, kBarH + 80.f + i * 52.f, w - 520.f, 44.f};
         c.fillRoundRect(r, 6.f, Color::argb(0xFF161311));
-        c.fillRect({r.x, r.y, 4.f, r.h}, i == 0 ? amber() : gold());
-        c.drawText(items[i], r.x + 16.f, r.y + 10.f, 16.f, ink(), false);
+        c.fillRect({r.x, r.y, 6.f, r.h}, i == 0 ? amber() : gold());
+        c.drawText(items[i], r.x + 16.f, r.y + 10.f, 18.f, ink(), false);
+        c.fillRoundRect({520.f, r.y + 8.f, 64.f, 26.f}, 8.f, Color::argb(0xFF2A2118));
+        c.drawText(tags[i], 528.f, r.y + 10.f, 18.f, rod(), true);
+        c.drawText(durs[i], 760.f, r.y + 10.f, 18.f, dim(), false);
+        c.fillEllipse(r.x + r.w - 28.f, r.y + 22.f, 6.f, 6.f, i < 2 ? gold() : Color::argb(0xFF3C3732));
+    }
+    Rect preview{w - 320.f, kBarH + 80.f, 300.f, 220.f};
+    panelBox(c, preview, 8.f);
+    c.drawText("Warm Pad", preview.x + 16.f, preview.y + 12.f, 18.f, ink(), true);
+    for (int i = 0; i < 48; ++i) {
+        const float amp = 8.f + 28.f * std::fabs(std::sin(i * 0.45f));
+        c.fillRect({preview.x + 16.f + i * 5.5f, preview.y + 90.f - amp, 3.f, amp * 2.f}, amber());
+    }
+    c.fillRoundRect({preview.x + 16.f, preview.y + 150.f, 36.f, 28.f}, 4.f, Color::argb(0xFF1A1614));
+    playGlyph(c, preview.x + 28.f, preview.y + 156.f, 16.f, rod());
+    c.drawText("Recent", preview.x, preview.y + 240.f, 18.f, dim(), true);
+    for (int i = 0; i < 3; ++i) {
+        Rect tile{preview.x + i * 100.f, preview.y + 268.f, 92.f, 64.f};
+        c.fillRoundRect(tile, 6.f, Color::argb(0xFF161311));
+        c.drawText(items[i], tile.x + 8.f, tile.y + 20.f, 18.f, ink(), false);
     }
 }
 

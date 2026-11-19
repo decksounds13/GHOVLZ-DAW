@@ -24,6 +24,14 @@ jobs:
         run: cmake --build build
       - name: Test
         run: xvfb-run -a ctest --test-dir build --output-on-failure
+      - name: Screenshots
+        run: |
+          mkdir -p shots
+          xvfb-run -a ./build/bin/RELEASE/GHOVLZ\ DAW --screenshot shots --theme ghovlz-gold
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-frames
+          path: shots
 
   windows:
     runs-on: windows-2022
@@ -42,7 +50,7 @@ jobs:
       - name: WARP screenshots
         run: |
           New-Item -ItemType Directory -Force -Path shots | Out-Null
-          & "build/bin/Release/GHOVLZ DAW.exe" --force-warp --simulate-device-lost --screenshot shots
+          & "build/bin/RELEASE/GHOVLZ DAW.exe" --force-warp --simulate-device-lost --screenshot shots
       - uses: actions/upload-artifact@v4
         with:
           name: windows-warp-frames
