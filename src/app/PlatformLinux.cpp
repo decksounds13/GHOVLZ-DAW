@@ -90,6 +90,12 @@ int runWindow(AppHost& host) {
                     host.engine->seek(0);
                 } else if (hit == Hit::Rec) {
                     host.engine->setRecording(!host.engine->recording());
+                } else if (hit == Hit::Loop && host.project) {
+                    host.project->loop = !host.project->loop;
+                    host.engine->setProject(host.project);
+                } else if (hit == Hit::Metro && host.project) {
+                    host.project->metronome = !host.project->metronome;
+                    host.engine->setProject(host.project);
                 } else {
                     host.frame.view = viewFromHit(hit, host.frame.view);
                 }

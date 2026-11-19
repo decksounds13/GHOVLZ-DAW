@@ -1,5 +1,9 @@
 #pragma once
 
+// Provenance: RBJ Audio EQ Cookbook biquads, the same coefficient family the
+// GHOVLZ-EQ processors used. Re-expressed here. The EQ repository does not
+// publish a license file.
+
 #include <algorithm>
 #include <cmath>
 

@@ -55,13 +55,15 @@ A source gate rejects the old framework's type names, module headers, Projucer f
 
 ### Parameters and state
 
-Native devices store numbers in `DeviceState.params`. VST3 devices store normalized 0..1 values on `Param` and call `setParamNormalized` before each block. `IComponent::getState` / `setState` go through a memory stream and base64 in the project file. Single-component plugins return the controller as the component; terminate the component once.
+Native devices store numbers in `DeviceState.params`. Each `Param` keeps an atomic target. The audio thread reads that target through `Device::at(index)` and one-pole smooths it. It does not look up parameters by name. VST3 changes are written into a fixed-capacity `IParameterChanges` queue and notes into a fixed-capacity `IEventList`. The callback does not call `setParamNormalized` and does not allocate those queues. A component that does not itself implement `IEditController` is connected with `getControllerClassId` and `IConnectionPoint`. `IComponent::getState` / `setState` go through a memory stream and base64 in the project file. A single-component plugin is terminated once. A separate controller is disconnected and terminated on its own. The out-of-process scan is killed after 20 seconds.
 
 ### Threading
 
-The message thread owns the `Project` and publishes a graph of nodes. `process` takes a `shared_ptr` copy of that graph at the start of the block. That publish is not yet an atomic `shared_ptr` swap, so a render that calls `setProject` from the audio thread is not safe. Tests are single-threaded. The analyzer snapshot is copied under a mutex; that lock is on the audio thread and should move to a double buffer before this is treated as a realtime host.
+The message thread owns the `Project` and publishes a graph. `process` increments a reader count, loads an `atomic<Graph*>`, and decrements the count when the block ends. `publish` exchanges the pointer and deletes the previous graph only after the reader count is zero. `std::atomic<std::shared_ptr>` is not used, because libstdc++ locks inside it. The test executable replaces `operator new` and counts hits while a thread-local realtime depth is positive. A 10 minute showcase run at 48 kHz and 256 frames reports zero hits. Ten thousand `setProject` calls during playback are clean under ThreadSanitizer. AddressSanitizer and UndefinedBehaviorSanitizer are clean on the same suite.
 
-Delay lines and record takes live on the `Engine` instance. An offline render constructs its own engine so it does not share them with the live device.
+Delay lines are created in `publish` and the audio thread only advances them. A recording take is a pre-sized buffer with an atomic write index, and the clip is placed at the playhead where recording started. Live MIDI arrives through a fixed ring and is inserted into the armed instrument at a sample offset. The instrument chain of a MIDI track runs once per block, including blocks where no clip overlaps, so tails continue. An offline render constructs its own engine.
+
+Windows audio is WASAPI through miniaudio, shared or exclusive, with the Pro Audio MMCSS usage. ASIO is a separate host in `src/audio/AsioBackend.cpp`. The SDK is not in the repository. CMake downloads ASIO SDK 2.3.4 into the build tree on Windows, or `GHOVLZ_ASIO_SDK_DIR` points at a local copy. A closed-source release that links ASIO still needs Steinberg's proprietary licence. `tools/check_no_asio_sdk.py` fails CI if the SDK files are committed.
 
 ### Message loop
 
@@ -148,11 +150,11 @@ Scope is the amount of code that has to move, not a calendar estimate.
 
 The Windows renderer is Direct2D because that backend was the one that made the other GHOVLZ apps responsive. This VM has no D3D11 device, so Direct2D was not executed here. Windows CI compiles `Direct2DCanvas.cpp`. Linux runs `SoftwareCanvas`.
 
-Measured on the software canvas, arrangement view, 1680×980, after the eight screenshots had already filled the shadow cache:
+Measured on the software canvas, arrangement view, 1680×980, in the screenshot pass that wrote `docs/screenshots/`:
 
-- first 30 frames: 16.9 ms each
-- next 200 frames: 16.1 ms each
+- cold: 13.7 ms
+- warm: 12.9 ms
 
-That is about 60 frames per second of full-window software painting on this machine, with cached shadow masks. A miss rebuilds the mask (rounded rect plus two box blurs). The Direct2D path caches `ID2D1Effect` objects the same way and should spend the frame in the GPU composite rather than in per-pixel loops. A like-for-like number against the old framework's Direct2D UI was not taken: that UI is not in this tree, and this VM cannot create a D3D11 device.
+An earlier pass, before the glyph cache, was 16.9 ms for the first 30 frames and 16.1 ms for the next 200. The Direct2D path caches `ID2D1Effect` objects the same way. This VM cannot create a D3D11 device, so those numbers are the software canvas. The Windows job is pinned to `windows-2022` because `windows-latest` is a VS 2026 image and does not provide the Visual Studio 17 2022 generator. Direct2D is compiled by that job. It had not been compiled on `windows-latest`.
 
-Badge text on Windows is `D3D11` or `WARP`. On Linux and on the screenshot PNGs it is `CPU`.
+Badge text on Windows is `D3D11` or `WARP`. On Linux and on the screenshot PNGs it is `CPU`. `WM_DPICHANGED` updates the Direct2D DPI before the window is resized. `dipExtent` maps 1680 physical pixels to 1680, 1120, and 840 DIP at 96, 144, and 192 DPI.

@@ -80,6 +80,12 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                     state->host->engine->seek(0);
                 } else if (hit == Hit::Rec) {
                     state->host->engine->setRecording(!state->host->engine->recording());
+                } else if (hit == Hit::Loop && state->host->project) {
+                    state->host->project->loop = !state->host->project->loop;
+                    state->host->engine->setProject(state->host->project);
+                } else if (hit == Hit::Metro && state->host->project) {
+                    state->host->project->metronome = !state->host->project->metronome;
+                    state->host->engine->setProject(state->host->project);
                 } else {
                     state->host->frame.view = viewFromHit(hit, state->host->frame.view);
                 }
@@ -100,6 +106,8 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             }
             return 0;
         case WM_DPICHANGED: {
+            if (state && state->canvas)
+                setDirect2DDpi(*state->canvas, static_cast<int>(HIWORD(wp)));
             const RECT* suggested = reinterpret_cast<const RECT*>(lp);
             SetWindowPos(hwnd, nullptr, suggested->left, suggested->top, suggested->right - suggested->left,
                          suggested->bottom - suggested->top, SWP_NOZORDER | SWP_NOACTIVATE);

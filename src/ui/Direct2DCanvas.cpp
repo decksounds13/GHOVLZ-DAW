@@ -37,10 +37,11 @@ class Direct2DCanvas final : public Canvas {
 public:
     Direct2DCanvas(HWND hwnd, int w, int h) : hwnd_(hwnd), w_(w), h_(h) { ready_ = create(); }
 
-    int width() const override { return w_; }
-    int height() const override { return h_; }
+    int width() const override { return std::max(1, w_ * 96 / std::max(96, dpi_)); }
+    int height() const override { return std::max(1, h_ * 96 / std::max(96, dpi_)); }
     const char* backendName() const override { return warp_ ? "WARP" : (ready_ ? "D3D11" : "CPU"); }
     bool ready() const { return ready_; }
+    void setDpi(int dpi) { applyDpi(dpi); }
 
     void resize(int w, int h) {
         if (!ready_ || !swap_ || w < 1 || h < 1 || (w == w_ && h == h_))
@@ -332,8 +333,14 @@ private:
         UINT dpi = 96;
         if (auto getDpi = reinterpret_cast<UINT(WINAPI*)(HWND)>(GetProcAddress(GetModuleHandleW(L"user32.dll"), "GetDpiForWindow")))
             dpi = getDpi(hwnd_);
-        dc_->SetDpi(static_cast<float>(dpi), static_cast<float>(dpi));
+        applyDpi(static_cast<int>(dpi));
         return bindTarget();
+    }
+
+    void applyDpi(int dpi) {
+        dpi_ = dpi < 96 ? 96 : dpi;
+        if (dc_)
+            dc_->SetDpi(static_cast<float>(dpi_), static_cast<float>(dpi_));
     }
 
     bool bindTarget() {
@@ -353,6 +360,7 @@ private:
     HWND hwnd_ = nullptr;
     int w_ = 0;
     int h_ = 0;
+    int dpi_ = 96;
     bool ready_ = false;
     bool warp_ = false;
     int clipDepth_ = 0;
@@ -378,6 +386,11 @@ std::unique_ptr<Canvas> makeDirect2DCanvas(void* hwnd, int width, int height) {
 void resizeDirect2DCanvas(Canvas& canvas, int width, int height) {
     if (auto* d2d = dynamic_cast<Direct2DCanvas*>(&canvas))
         d2d->resize(width, height);
+}
+
+void setDirect2DDpi(Canvas& canvas, int dpi) {
+    if (auto* d2d = dynamic_cast<Direct2DCanvas*>(&canvas))
+        d2d->setDpi(dpi);
 }
 
 } // namespace ghovlz

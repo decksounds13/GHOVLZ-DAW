@@ -103,11 +103,13 @@ foreach(cfg DEBUG RELEASE RELWITHDEBINFO MINSIZEREL)
 endforeach()
 
 add_library(ghovlz_core STATIC
+    src/core/RtGuard.cpp
     src/dsp/Devices.cpp
     src/io/WavFile.cpp
     src/model/Project.cpp
     src/engine/Engine.cpp
-    src/host/PluginHost.cpp)
+    src/host/PluginHost.cpp
+    src/audio/FakeBackend.cpp)
 target_include_directories(ghovlz_core PUBLIC "${CMAKE_SOURCE_DIR}/src")
 target_link_libraries(ghovlz_core PUBLIC nlohmann_json::nlohmann_json ${GHOVLZ_VST3_LIBS})
 if(UNIX AND NOT APPLE)
@@ -136,15 +138,23 @@ add_executable(GhovlzTests tests/Tests.cpp)
 target_link_libraries(GhovlzTests PRIVATE ghovlz_core Catch2::Catch2WithMain)
 add_dependencies(GhovlzTests GhovlzTestGain GhovlzCrash GhovlzPluginScan)
 
+if(WIN32)
+    option(GHOVLZ_WITH_ASIO "Build the ASIO backend. The SDK is downloaded into the build tree unless GHOVLZ_ASIO_SDK_DIR is set." ON)
+else()
+    option(GHOVLZ_WITH_ASIO "Build the ASIO backend. Windows only." OFF)
+endif()
+set(GHOVLZ_ASIO_SDK_DIR "" CACHE PATH "Local ASIO SDK directory containing common/asio.h. Leave empty to download it into the build tree.")
+
 add_executable(GhovlzDAW
     src/app/main.cpp
     src/audio/AudioIO.cpp
+    src/audio/AsioBackend.cpp
     src/midi/MidiIO.cpp
     src/ui/SoftwareCanvas.cpp
     src/ui/Paint.cpp)
 if(WIN32)
     target_sources(GhovlzDAW PRIVATE src/ui/Direct2DCanvas.cpp src/app/PlatformWin.cpp)
-    target_link_libraries(GhovlzDAW PRIVATE d3d11 dxgi d2d1 dwrite windowscodecs ole32 uuid)
+    target_link_libraries(GhovlzDAW PRIVATE d3d11 dxgi d2d1 dwrite windowscodecs ole32 uuid avrt)
 else()
     target_sources(GhovlzDAW PRIVATE src/app/PlatformLinux.cpp)
     find_package(X11 REQUIRED)
@@ -153,6 +163,43 @@ endif()
 target_include_directories(GhovlzDAW PRIVATE "${miniaudio_SOURCE_DIR}" "${stb_SOURCE_DIR}")
 target_link_libraries(GhovlzDAW PRIVATE ghovlz_core rtmidi)
 target_compile_definitions(GhovlzDAW PRIVATE GHOVLZ_ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets")
+if(GHOVLZ_WITH_ASIO)
+    if(NOT WIN32)
+        message(FATAL_ERROR "GHOVLZ_WITH_ASIO is the Windows ASIO host. Configure it on Windows.")
+    endif()
+    set(_ghovlz_asio "${GHOVLZ_ASIO_SDK_DIR}")
+    if(NOT _ghovlz_asio)
+        set(_ghovlz_asio_zip "${CMAKE_BINARY_DIR}/asio-sdk/ASIO-SDK_2.3.4_2025-10-15.zip")
+        set(_ghovlz_asio_root "${CMAKE_BINARY_DIR}/asio-sdk")
+        if(NOT EXISTS "${_ghovlz_asio_root}/ASIOSDK/common/asio.h")
+            message(STATUS "Downloading the ASIO SDK into the build tree")
+            file(DOWNLOAD
+                https://download.steinberg.net/sdk_downloads/ASIO-SDK_2.3.4_2025-10-15.zip
+                "${_ghovlz_asio_zip}"
+                EXPECTED_HASH SHA256=d5ebf0c20dd2c5f43771fd0c1418f4b361bf52434ee670097cfa6b3a335e2eca
+                SHOW_PROGRESS
+                STATUS _ghovlz_asio_status)
+            list(GET _ghovlz_asio_status 0 _ghovlz_asio_code)
+            if(NOT _ghovlz_asio_code EQUAL 0)
+                message(FATAL_ERROR "ASIO SDK download failed: ${_ghovlz_asio_status}. Set GHOVLZ_ASIO_SDK_DIR to a local copy.")
+            endif()
+            file(ARCHIVE_EXTRACT INPUT "${_ghovlz_asio_zip}" DESTINATION "${_ghovlz_asio_root}")
+        endif()
+        set(_ghovlz_asio "${_ghovlz_asio_root}/ASIOSDK")
+    endif()
+    if(NOT EXISTS "${_ghovlz_asio}/common/asio.h")
+        message(FATAL_ERROR "GHOVLZ_ASIO_SDK_DIR does not contain common/asio.h: ${_ghovlz_asio}")
+    endif()
+    target_compile_definitions(GhovlzDAW PRIVATE GHOVLZ_WITH_ASIO=1)
+    target_include_directories(GhovlzDAW PRIVATE
+        "${_ghovlz_asio}/common"
+        "${_ghovlz_asio}/host"
+        "${_ghovlz_asio}/host/pc")
+    target_sources(GhovlzDAW PRIVATE
+        "${_ghovlz_asio}/host/asiodrivers.cpp"
+        "${_ghovlz_asio}/host/pc/asiolist.cpp")
+    message(STATUS "ASIO backend enabled from ${_ghovlz_asio}")
+endif()
 if(UNIX AND NOT APPLE)
     target_link_libraries(GhovlzDAW PRIVATE asound pthread)
 endif()
@@ -161,4 +208,5 @@ set_target_properties(GhovlzDAW PROPERTIES OUTPUT_NAME "GHOVLZ DAW")
 include(CTest)
 add_test(NAME ghovlz_tests COMMAND GhovlzTests)
 add_test(NAME no_juce COMMAND ${CMAKE_COMMAND} -DGHOVLZ_SOURCE_DIR=${CMAKE_SOURCE_DIR} -P ${CMAKE_SOURCE_DIR}/cmake/NoJuce.cmake)
+add_test(NAME no_asio_sdk COMMAND ${CMAKE_COMMAND} -E env python3 ${CMAKE_SOURCE_DIR}/tools/check_no_asio_sdk.py)
 set_property(DIRECTORY PROPERTY VS_STARTUP_PROJECT GhovlzDAW)

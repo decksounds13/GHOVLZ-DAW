@@ -384,8 +384,11 @@ Project Project::makeShowcase() {
     drums->devices.push_back(dev("d-glue", "compressor", "Glue"));
     bass->devices.push_back(dev("d-satb", "saturator", "Saturator"));
     lead->devices.push_back(dev("d-wt", "wavetable", "Wavetable"));
+    lead->devices.back().params = {{"position", 0.62f}, {"wave", 0.35f}, {"unison", 3.f}, {"cutoff", 4200.f}};
     lead->devices.push_back(dev("d-flt", "filter", "Filter"));
+    lead->devices.back().params = {{"cutoff", 1800.f}, {"reso", 1.4f}, {"mix", 0.85f}};
     lead->devices.push_back(dev("d-sat", "saturator", "Saturator"));
+    lead->devices.back().params = {{"drive", 12.f}, {"tone", 0.15f}, {"mix", 0.7f}};
     pads->devices.push_back(dev("d-pad", "wavetable", "Wavetable"));
     vox->devices.push_back(dev("d-veq", "eq", "EQ Eight"));
     retA->devices.push_back(dev("d-rev", "reverb", "Reverb"));
@@ -416,6 +419,10 @@ Project Project::makeShowcase() {
     lane.id = "track:lead:gain";
     lane.points = {AutoPoint{64, -8.f}, AutoPoint{80, -2.f}, AutoPoint{96, -6.f}};
     p.automation.push_back(lane);
+    Lane cutoff;
+    cutoff.id = "track:pads:cutoff";
+    cutoff.points = {AutoPoint{0, 0.22f}, AutoPoint{32, 0.55f}, AutoPoint{64, 0.92f}, AutoPoint{96, 0.38f}, AutoPoint{128, 0.6f}};
+    p.automation.push_back(cutoff);
     return p;
 }
 

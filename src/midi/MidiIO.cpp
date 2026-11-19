@@ -1,6 +1,7 @@
 #include "midi/MidiIO.h"
 
 #include "RtMidi.h"
+#include "engine/Engine.h"
 
 #include <vector>
 
@@ -28,6 +29,13 @@ bool MidiIO::open() {
         port_ = impl_->input->getPortName(0);
         impl_->input->openPort(0);
         impl_->input->ignoreTypes(false, false, false);
+        impl_->input->setCallback([](double, std::vector<unsigned char>* message, void* user) {
+            auto* self = static_cast<MidiIO*>(user);
+            if (!self || !self->engine_ || !message || message->size() < 3)
+                return;
+            const int offset = 0;
+            self->engine_->pushMidi(offset, (*message)[0], (*message)[1], (*message)[2]);
+        }, this);
         return true;
     } catch (const RtMidiError&) {
         port_ = "MIDI unavailable";

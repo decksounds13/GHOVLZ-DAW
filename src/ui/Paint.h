@@ -29,7 +29,7 @@ struct Frame {
 void paintFrame(Canvas& canvas, const Frame& frame);
 
 // Top-bar hit targets, in the same coordinates paintFrame uses.
-enum class Hit { None, Arr, Ses, Perf, Mix, Play, Stop, Rec };
+enum class Hit { None, Arr, Ses, Perf, Mix, Play, Stop, Rec, Loop, Metro };
 
 Hit hitTest(float x, float y, int width, int height);
 View viewFromHit(Hit hit, View current);

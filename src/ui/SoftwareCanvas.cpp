@@ -89,15 +89,24 @@ Image loadImageRgba(const std::string& path) {
 class SoftwareCanvas final : public Canvas {
 public:
     SoftwareCanvas(int w, int h) : w_(w), h_(h), px_(static_cast<size_t>(w) * static_cast<size_t>(h) * 4, 0) {
-        regular_ = loadFont("/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf");
+        const std::string assets = GHOVLZ_ASSETS_DIR;
+        // Linux bundles OFL faces. Windows DirectWrite uses Segoe UI and Bahnschrift;
+        // these files are the same metrics-ish fallback if this canvas runs there.
+        regular_ = loadFont(assets + "/fonts/SourceSans3-Regular.ttf");
         if (!regular_.ok)
             regular_ = loadFont("C:/Windows/Fonts/segoeui.ttf");
-        bold_ = loadFont("/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf");
+        if (!regular_.ok)
+            regular_ = loadFont("/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf");
+        bold_ = loadFont(assets + "/fonts/SourceSans3-Bold.ttf");
         if (!bold_.ok)
             bold_ = loadFont("C:/Windows/Fonts/segoeuib.ttf");
         if (!bold_.ok)
+            bold_ = loadFont("/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf");
+        if (!bold_.ok)
             bold_ = regular_;
-        wordmark_ = loadFont(std::string(GHOVLZ_ASSETS_DIR) + "/pirulen.ttf");
+        wordmark_ = loadFont(assets + "/fonts/Barlow-SemiBold.ttf");
+        if (!wordmark_.ok)
+            wordmark_ = loadFont("C:/Windows/Fonts/bahnschrift.ttf");
         if (!wordmark_.ok)
             wordmark_ = bold_;
     }
@@ -207,24 +216,19 @@ public:
         int ascent = 0, descent = 0, lineGap = 0;
         stbtt_GetFontVMetrics(&font.info, &ascent, &descent, &lineGap);
         float baseline = y + ascent * scale;
+        const int fontId = &font == &wordmark_ ? 2 : (&font == &bold_ ? 1 : 0);
+        const int pxSize = std::max(1, static_cast<int>(std::lround(size)));
         float pen = x;
         for (unsigned char ch : text) {
-            int ax = 0, lsb = 0;
-            stbtt_GetCodepointHMetrics(&font.info, ch, &ax, &lsb);
-            int x0 = 0, y0 = 0, x1 = 0, y1 = 0;
-            stbtt_GetCodepointBitmapBox(&font.info, ch, scale, scale, &x0, &y0, &x1, &y1);
-            const int gw = x1 - x0;
-            const int gh = y1 - y0;
-            if (gw > 0 && gh > 0) {
-                std::vector<unsigned char> bmp(static_cast<size_t>(gw * gh));
-                stbtt_MakeCodepointBitmap(&font.info, bmp.data(), gw, gh, gw, scale, scale, ch);
-                for (int row = 0; row < gh; ++row) {
-                    for (int col = 0; col < gw; ++col) {
-                        uint8_t cov = bmp[static_cast<size_t>(row * gw + col)];
+            const Glyph& glyph = glyphFor(font, fontId, pxSize, ch, scale);
+            if (glyph.gw > 0 && glyph.gh > 0) {
+                for (int row = 0; row < glyph.gh; ++row) {
+                    for (int col = 0; col < glyph.gw; ++col) {
+                        uint8_t cov = glyph.bmp[static_cast<size_t>(row * glyph.gw + col)];
                         if (!cov)
                             continue;
-                        int px = static_cast<int>(std::lround(pen + lsb * scale)) + col + x0;
-                        int py = static_cast<int>(std::lround(baseline)) + row + y0;
+                        int px = static_cast<int>(std::lround(pen + glyph.lsb * scale)) + col + glyph.x0;
+                        int py = static_cast<int>(std::lround(baseline)) + row + glyph.y0;
                         Color c = color;
                         c.a = static_cast<uint8_t>(color.a * cov / 255);
                         if (insideClip(px, py))
@@ -232,7 +236,7 @@ public:
                     }
                 }
             }
-            pen += ax * scale;
+            pen += glyph.ax * scale;
         }
     }
 
@@ -388,9 +392,40 @@ private:
         p[3] = 255;
     }
 
+    struct Glyph {
+        std::vector<unsigned char> bmp;
+        int gw = 0, gh = 0, x0 = 0, y0 = 0, ax = 0, lsb = 0;
+    };
+    struct GKey {
+        int font, size, cp;
+        bool operator<(const GKey& o) const {
+            if (font != o.font) return font < o.font;
+            if (size != o.size) return size < o.size;
+            return cp < o.cp;
+        }
+    };
+    const Glyph& glyphFor(const FontFile& font, int fontId, int pxSize, int cp, float scale) {
+        const GKey key{fontId, pxSize, cp};
+        auto it = glyphs_.find(key);
+        if (it != glyphs_.end())
+            return it->second;
+        Glyph g;
+        stbtt_GetCodepointHMetrics(&font.info, cp, &g.ax, &g.lsb);
+        int x1 = 0, y1 = 0;
+        stbtt_GetCodepointBitmapBox(&font.info, cp, scale, scale, &g.x0, &g.y0, &x1, &y1);
+        g.gw = x1 - g.x0;
+        g.gh = y1 - g.y0;
+        if (g.gw > 0 && g.gh > 0) {
+            g.bmp.assign(static_cast<size_t>(g.gw * g.gh), 0);
+            stbtt_MakeCodepointBitmap(&font.info, g.bmp.data(), g.gw, g.gh, g.gw, scale, scale, cp);
+        }
+        return glyphs_.emplace(key, std::move(g)).first->second;
+    }
+
     int w_, h_;
     std::vector<uint8_t> px_;
     FontFile regular_, bold_, wordmark_;
+    std::map<GKey, Glyph> glyphs_;
     bool clipped_ = false;
     Rect clip_{};
     std::map<Key, std::vector<float>> shadows_;

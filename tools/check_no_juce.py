@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-NEEDLES = ("juce::", "JuceHeader", "juce_", "JUCE_MODULE", "find_package(JUCE")
+NEEDLES = ("juce::", "JuceHeader", "juce_", "JUCE_MODULE", "find_package(JUCE", "gin::", "melatonin_blur", "MelatoninBlur")
 SKIP_DIRS = {".git", "build", "build-vs", ".vs", "docs"}
 SKIP_FILES = {"NoJuce.cmake", "check_no_juce.py"}
 SUFFIXES = {".h", ".hpp", ".cpp", ".cc", ".cxx", ".cmake", ".txt", ".yml", ".yaml"}

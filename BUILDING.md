@@ -2,7 +2,7 @@
 
 This is a CMake project. There is no Projucer file and there is no JUCE module path to set. CMake downloads the libraries it is allowed to fetch (Catch2, nlohmann/json, RtMidi, miniaudio, stb, and the VST3 SDK). You do not install those by hand.
 
-The ASIO SDK is not downloaded. Windows playback and recording use WASAPI. See the license note at the bottom if you later point a configure at an ASIO SDK you already have.
+Windows playback defaults to WASAPI. ASIO is optional and is not stored in this repository. See the ASIO section below.
 
 ## What to install
 
@@ -111,8 +111,22 @@ Screenshots of every main view:
 "./build/bin/RELEASE/GHOVLZ DAW" --screenshot docs/screenshots
 ```
 
+## ASIO
+
+The Steinberg ASIO SDK is not in this repository. Its terms do not allow us to commit the headers, the sources, or a vendored copy. CMake downloads `ASIO-SDK_2.3.4_2025-10-15.zip` into the `build` directory when you configure on Windows. `GHOVLZ_WITH_ASIO` defaults to ON on Windows and OFF everywhere else. The download stays in the build tree.
+
+If you already have the SDK, point CMake at it and it will not download anything:
+
+```bat
+cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DGHOVLZ_ASIO_SDK_DIR=C:\SDKs\ASIOSDK
+```
+
+The directory must contain `common\asio.h`. Turn the backend off with `-DGHOVLZ_WITH_ASIO=OFF`. The app then uses WASAPI only.
+
+In the running app, WASAPI is the default. Choose ASIO by passing an `AudioSettings` whose `backend` is `"asio"` (shared or exclusive WASAPI uses `"wasapi"`). A closed-source release that links ASIO still needs Steinberg's proprietary licence. CI fails if `asio.h`, `iasiodrv.h`, `asiodrivers.cpp`, or the other SDK filenames are ever committed. The check is `python tools/check_no_asio_sdk.py`.
+
 ## Licenses that affect the build
 
 - **VST3 SDK 3.8.1** (tag `v3.8.1_build_84`) is fetched by CMake. That tag is MIT, Copyright (c) 2026 Steinberg Media Technologies GmbH. This tree does not use the older 3.7 SDK, which is proprietary or GPL.
-- **ASIO SDK** is optional and is not fetched. It is Steinberg's proprietary SDK for closed-source software. This repository does not contain it, and the app does not link it. Playback on Windows is WASAPI. If you already have the SDK, the hook is the `ASIO_SDK_DIR` cache variable; the current sources document that and still run on WASAPI. See `src/audio/AsioBackend.h` and `third_party/NOTICE.md`.
+- **ASIO SDK 2.3.4** is fetched into the build tree on Windows, or read from `GHOVLZ_ASIO_SDK_DIR`. It is not committed. See `src/audio/AsioBackend.h` and `third_party/NOTICE.md`.
 - This is an internal build. Do not redistribute the VST3 SDK or an ASIO-linked binary without checking Steinberg's terms.

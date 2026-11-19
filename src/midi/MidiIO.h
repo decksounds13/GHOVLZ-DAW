@@ -11,6 +11,7 @@ public:
     MidiIO(const MidiIO&) = delete;
     MidiIO& operator=(const MidiIO&) = delete;
 
+    void setEngine(class Engine* engine) { engine_ = engine; }
     bool open();
     void close();
     void poll();
@@ -20,6 +21,7 @@ public:
 private:
     struct Impl;
     Impl* impl_ = nullptr;
+    class Engine* engine_ = nullptr;
     std::string port_;
     int notes_ = 0;
 };

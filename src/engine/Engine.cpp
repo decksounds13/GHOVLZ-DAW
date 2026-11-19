@@ -1,14 +1,12 @@
 #include "engine/Engine.h"
+#include "core/RtGuard.h"
 #include "dsp/Devices.h"
 #include "host/PluginHost.h"
 #include "io/WavFile.h"
 
 #include <algorithm>
-#include <chrono>
 #include <cmath>
 #include <cstring>
-#include <functional>
-#include <mutex>
 
 #if defined(__SSE__)
 #include <xmmintrin.h>
@@ -39,7 +37,20 @@ struct Node {
     std::atomic<int> sessionScene {-1};
     std::atomic<double> sessionOrigin {0};
     std::atomic<float> meter {0.f};
+    std::atomic<float> hold {0.f};
+    std::atomic<uint8_t> clipLamp {0};
     int chainLatency = 0;
+    AudioBuffer work;
+    AudioBuffer shaped;
+    MidiBuffer midiIn;
+    Engine::DelayLineState* delay = nullptr;
+    std::atomic<Engine::RecSlot*> rec {nullptr};
+};
+
+struct AutoApply {
+    Node* node = nullptr;
+    int kind = 0;
+    std::vector<AutoPoint> points;
 };
 
 struct EngineGraph {
@@ -52,6 +63,7 @@ struct EngineGraph {
     bool metronome = false;
     float metronomeLevel = 0.3f;
     std::vector<Lane> automation;
+    std::vector<AutoApply> autos;
     std::map<std::string, MediaPtr> media;
     std::vector<std::unique_ptr<Node>> nodes;
 
@@ -63,13 +75,31 @@ struct EngineGraph {
     }
 };
 
+void rememberPeak(Node* n, float pk) {
+    n->meter.store(std::max(pk, n->meter.load() * 0.92f));
+    n->hold.store(std::max(pk, n->hold.load() * 0.998f));
+    if (pk >= 0.98f)
+        n->clipLamp.store(1);
+}
+void fitBuffer(AudioBuffer& b, int frames) {
+    if (b.channels != 2 || b.frames != frames || b.data.size() < static_cast<size_t>(frames) * 2)
+        b.resize(2, frames);
+    else
+        b.clear();
+}
+
 void delayWriteAdd(Engine::DelayLineState& line, const AudioBuffer& src, AudioBuffer& dst, int delaySamples) {
     delaySamples = std::max(0, delaySamples);
-    if (line.delay != delaySamples || line.cap <= delaySamples) {
-        line.delay = delaySamples;
+    if (line.cap <= delaySamples) {
         line.cap = std::max(8, delaySamples + 8);
         for (auto& ch : line.data)
             ch.assign(line.cap, 0.f);
+        line.w = 0;
+    }
+    if (line.delay != delaySamples) {
+        line.delay = delaySamples;
+        for (auto& ch : line.data)
+            std::fill(ch.begin(), ch.end(), 0.f);
         line.w = 0;
     }
     const int n = std::min(src.frames, dst.frames);
@@ -87,21 +117,21 @@ void delayWriteAdd(Engine::DelayLineState& line, const AudioBuffer& src, AudioBu
     }
 }
 
-float evalLane(const Lane& lane, double q) {
-    if (lane.points.empty())
+float evalPoints(const std::vector<AutoPoint>& points, double q) {
+    if (points.empty())
         return 0.f;
-    if (q <= lane.points.front().quarter)
-        return lane.points.front().value;
-    for (size_t i = 1; i < lane.points.size(); ++i) {
-        if (q <= lane.points[i].quarter) {
-            const auto& a = lane.points[i - 1];
-            const auto& b = lane.points[i];
+    if (q <= points.front().quarter)
+        return points.front().value;
+    for (size_t i = 1; i < points.size(); ++i) {
+        if (q <= points[i].quarter) {
+            const auto& a = points[i - 1];
+            const auto& b = points[i];
             const double span = std::max(1e-9, b.quarter - a.quarter);
             const float t = static_cast<float>((q - a.quarter) / span);
             return a.value + (b.value - a.value) * t;
         }
     }
-    return lane.points.back().value;
+    return points.back().value;
 }
 
 void panGains(float pan, float& l, float& r) {
@@ -115,7 +145,18 @@ void panGains(float pan, float& l, float& r) {
 struct Engine::Graph : EngineGraph {};
 
 Engine::Engine() = default;
-Engine::~Engine() = default;
+Engine::~Engine() {
+    published_.store(nullptr, std::memory_order_release);
+    while (readers_.load(std::memory_order_acquire) != 0) {
+    }
+    owned_.clear();
+}
+
+Engine::Graph* Engine::acquire() const {
+    readers_.fetch_add(1, std::memory_order_acq_rel);
+    return published_.load(std::memory_order_acquire);
+}
+void Engine::releaseGraph() const { readers_.fetch_sub(1, std::memory_order_release); }
 
 void Engine::setPluginHost(std::shared_ptr<PluginHost> host) { plugins_ = std::move(host); }
 
@@ -125,11 +166,14 @@ void Engine::prepare(double sampleRate, int block) {
 #if defined(__SSE__)
     _mm_setcsr(_mm_getcsr() | 0x8040);
 #endif
-    if (graph_) {
-        for (auto& n : graph_->nodes)
+    Graph* g = acquire();
+    if (g) {
+        for (auto& n : g->nodes)
             for (auto& d : n->devices)
                 d->prepare(sampleRate_, block_);
     }
+    releaseGraph();
+    fitBuffer(mix_, block_);
 }
 
 void Engine::release() {}
@@ -157,10 +201,15 @@ std::shared_ptr<Device> Engine::makeLive(const DeviceState& state) {
 
 void Engine::publish() {
     if (!project_) {
-        graph_.reset();
+        Graph* old = published_.exchange(nullptr, std::memory_order_acq_rel);
+        while (readers_.load(std::memory_order_acquire) != 0) {
+        }
+        if (old)
+            owned_.clear();
         return;
     }
-    auto g = std::make_shared<Graph>();
+    Graph* previous = published_.load(std::memory_order_acquire);
+    auto g = std::make_unique<Graph>();
     g->bpm = project_->bpm;
     g->numerator = project_->numerator;
     g->denominator = project_->denominator;
@@ -199,19 +248,71 @@ void Engine::publish() {
             n->devices.push_back(std::move(live));
         }
         n->chainLatency = lat;
-        if (graph_) {
-            if (auto* old = graph_->find(t.id)) {
+        if (previous) {
+            if (auto* old = previous->find(t.id)) {
                 n->meter.store(old->meter.load());
+                n->hold.store(old->hold.load());
+                n->clipLamp.store(old->clipLamp.load());
                 n->sessionScene.store(old->sessionScene.load());
                 n->sessionOrigin.store(old->sessionOrigin.load());
+                n->rec.store(old->rec.load());
             }
         }
+        n->work.resize(2, std::max(1, block_));
+        n->shaped.resize(2, std::max(1, block_));
+        n->midiIn.events.reserve(512);
         g->nodes.push_back(std::move(n));
     };
     for (const auto& t : project_->tracks)
         addNode(t);
     addNode(project_->master);
-    graph_ = g;
+    const int cap = std::max(64, static_cast<int>(sampleRate_) * 2);
+    for (auto& n : g->nodes) {
+        const bool leaf = n->type == TrackType::Audio || n->type == TrackType::Midi || n->type == TrackType::Return;
+        if (!leaf)
+            continue;
+        auto& line = delays_[n->id];
+        if (line.cap < cap) {
+            line.cap = cap;
+            line.w = 0;
+            line.delay = 0;
+            line.data[0].assign(static_cast<size_t>(cap), 0.f);
+            line.data[1].assign(static_cast<size_t>(cap), 0.f);
+        }
+        n->delay = &line;
+    }
+    for (const auto& lane : g->automation) {
+        const std::string prefix = "track:";
+        if (lane.id.rfind(prefix, 0) != 0)
+            continue;
+        const auto rest = lane.id.substr(prefix.size());
+        const auto colon = rest.rfind(':');
+        if (colon == std::string::npos)
+            continue;
+        const auto tid = rest.substr(0, colon);
+        const auto what = rest.substr(colon + 1);
+        AutoApply apply;
+        apply.node = g->find(tid);
+        apply.points = lane.points;
+        if (!apply.node)
+            continue;
+        if (what == "gain")
+            apply.kind = 0;
+        else if (what == "pan")
+            apply.kind = 1;
+        else
+            continue;
+        g->autos.push_back(std::move(apply));
+    }
+    Graph* raw = g.get();
+    owned_.push_back(std::move(g));
+    Graph* old = published_.exchange(raw, std::memory_order_acq_rel);
+    while (readers_.load(std::memory_order_acquire) != 0) {
+    }
+    if (old) {
+        owned_.erase(std::remove_if(owned_.begin(), owned_.end(), [&](const std::unique_ptr<Graph>& p) { return p.get() == old; }),
+                     owned_.end());
+    }
 }
 
 void Engine::setProject(std::shared_ptr<Project> project) {
@@ -233,26 +334,20 @@ static int routeOf(EngineGraph& g, Node* n, int guard = 0) {
 }
 
 static bool ancestorMuted(EngineGraph& g, Node* n) {
-    std::string id = n->output;
-    for (int i = 0; i < 16 && !id.empty() && id != "master"; ++i) {
-        auto* p = g.find(id);
-        if (!p)
-            break;
-        if (p->mute.load())
+    Node* p = n;
+    for (int i = 0; i < 16 && p && p->type != TrackType::Master && !p->output.empty() && p->output != "master"; ++i) {
+        p = g.find(p->output);
+        if (p && p->mute.load())
             return true;
-        id = p->output;
     }
     return false;
 }
 static bool ancestorSolo(EngineGraph& g, Node* n) {
-    std::string id = n->output;
-    for (int i = 0; i < 16 && !id.empty() && id != "master"; ++i) {
-        auto* p = g.find(id);
-        if (!p)
-            break;
-        if (p->solo.load())
+    Node* p = n;
+    for (int i = 0; i < 16 && p && p->type != TrackType::Master && !p->output.empty() && p->output != "master"; ++i) {
+        p = g.find(p->output);
+        if (p && p->solo.load())
             return true;
-        id = p->output;
     }
     return false;
 }
@@ -265,13 +360,21 @@ static bool descendantSolo(EngineGraph& g, Node* n) {
 }
 
 void Engine::process(float* interleavedOut, const float* interleavedIn, int frames) {
-    auto g = graph_;
+    RtScope audioThread;
+    Graph* g = acquire();
     if (!g || frames <= 0) {
-        if (interleavedOut)
+        releaseGraph();
+        if (interleavedOut && frames > 0)
             std::fill(interleavedOut, interleavedOut + frames * 2, 0.f);
         return;
     }
-    const auto t0 = std::chrono::steady_clock::now();
+#if defined(__SSE__)
+    thread_local int ftz = 0;
+    if (!ftz) {
+        _mm_setcsr(_mm_getcsr() | 0x8040);
+        ftz = 1;
+    }
+#endif
     const double spq = sampleRate_ * 60.0 / std::max(1.0, g->bpm);
     bool anySolo = false;
     int maxRoute = 0;
@@ -282,33 +385,30 @@ void Engine::process(float* interleavedOut, const float* interleavedIn, int fram
             maxRoute = std::max(maxRoute, routeOf(*g, n.get()));
     }
 
-    AudioBuffer master(2, frames);
-    master.clear();
-    std::map<std::string, AudioBuffer> returns;
+    fitBuffer(mix_, frames);
     for (auto& n : g->nodes)
-        if (n->type == TrackType::Return) {
-            returns[n->id].resize(2, frames);
-            returns[n->id].clear();
-        }
+        if (n->type == TrackType::Return)
+            fitBuffer(n->work, frames);
 
-    std::function<AudioBuffer(Node*)> render = [&](Node* n) -> AudioBuffer {
-        AudioBuffer buf(2, frames);
-        buf.clear();
+    auto render = [&](auto& self, Node* n) -> void {
+        fitBuffer(n->work, frames);
+        AudioBuffer& buf = n->work;
         const bool group = n->type == TrackType::Group;
         if (group) {
             for (auto& c : g->nodes) {
                 if (c->output != n->id)
                     continue;
-                AudioBuffer child = render(c.get());
+                self(self, c.get());
                 const bool leaf = c->type == TrackType::Audio || c->type == TrackType::Midi;
-                if (leaf)
-                    delayWriteAdd(delays_[c->id], child, buf, std::max(0, maxRoute - routeOf(*g, c.get())));
+                if (leaf && c->delay)
+                    delayWriteAdd(*c->delay, c->shaped, buf, std::max(0, maxRoute - routeOf(*g, c.get())));
                 else
-                    buf.addFrom(child);
+                    buf.addFrom(c->shaped);
             }
         } else if (n->type == TrackType::Audio || n->type == TrackType::Midi) {
             const bool play = playing_.load();
             const double q = playhead_.load();
+            n->midiIn.clear();
             if (play) {
                 const int scene = n->sessionScene.load();
                 if (scene >= 0 && scene < static_cast<int>(n->slots.size()) && n->slots[scene]) {
@@ -329,26 +429,16 @@ void Engine::process(float* interleavedOut, const float* interleavedIn, int fram
                         }
                     }
                     if (n->type == TrackType::Midi) {
-                        MidiBuffer midi;
                         for (const auto& note : clip.notes) {
                             const double on = note.startQ;
                             const double off = note.startQ + note.lengthQ;
-                            auto sampleAt = [&](double nq) {
-                                return static_cast<int>((nq - local) * spq);
-                            };
-                            const int onS = sampleAt(on);
-                            const int offS = sampleAt(off);
+                            const int onS = static_cast<int>((on - local) * spq);
+                            const int offS = static_cast<int>((off - local) * spq);
                             if (onS >= 0 && onS < frames)
-                                midi.add(onS, 0x90, static_cast<uint8_t>(note.pitch), static_cast<uint8_t>(note.velocity * 127));
+                                n->midiIn.add(onS, 0x90, static_cast<uint8_t>(note.pitch), static_cast<uint8_t>(note.velocity * 127));
                             if (offS >= 0 && offS < frames)
-                                midi.add(offS, 0x80, static_cast<uint8_t>(note.pitch), 0);
+                                n->midiIn.add(offS, 0x80, static_cast<uint8_t>(note.pitch), 0);
                         }
-                        AudioBuffer scratch(2, frames);
-                        scratch.clear();
-                        for (auto& d : n->devices)
-                            if (!d->bypass.load())
-                                d->process(scratch, midi);
-                        buf.addFrom(scratch);
                     }
                 } else {
                     for (const auto& clip : n->clips) {
@@ -373,21 +463,15 @@ void Engine::process(float* interleavedOut, const float* interleavedIn, int fram
                                     buf.ch(c)[i] += m.interleaved[static_cast<size_t>(wrapped) * m.channels + std::min(c, m.channels - 1)];
                             }
                         }
-                        if (!clip.notes.empty()) {
-                            MidiBuffer midi;
-                            for (const auto& note : clip.notes) {
-                                const double onQ = clip.startQ + note.startQ;
-                                const double offQ = onQ + note.lengthQ;
-                                const int onS = static_cast<int>((onQ - q) * spq);
-                                const int offS = static_cast<int>((offQ - q) * spq);
-                                if (onS >= 0 && onS < frames)
-                                    midi.add(onS, 0x90, static_cast<uint8_t>(note.pitch), static_cast<uint8_t>(note.velocity * 127));
-                                if (offS >= 0 && offS < frames)
-                                    midi.add(offS, 0x80, static_cast<uint8_t>(note.pitch), 0);
-                            }
-                            for (auto& d : n->devices)
-                                if (!d->bypass.load())
-                                    d->process(buf, midi);
+                        for (const auto& note : clip.notes) {
+                            const double onQ = clip.startQ + note.startQ;
+                            const double offQ = onQ + note.lengthQ;
+                            const int onS = static_cast<int>((onQ - q) * spq);
+                            const int offS = static_cast<int>((offQ - q) * spq);
+                            if (onS >= 0 && onS < frames)
+                                n->midiIn.add(onS, 0x90, static_cast<uint8_t>(note.pitch), static_cast<uint8_t>(note.velocity * 127));
+                            if (offS >= 0 && offS < frames)
+                                n->midiIn.add(offS, 0x80, static_cast<uint8_t>(note.pitch), 0);
                         }
                     }
                 }
@@ -398,24 +482,46 @@ void Engine::process(float* interleavedOut, const float* interleavedIn, int fram
                     buf.ch(1)[i] += interleavedIn[i * 2 + 1];
                 }
                 if (play && recording_.load()) {
-                    std::lock_guard<std::mutex> lock(recMu_);
-                    auto& take = takes_[n->id];
-                    take.rate = static_cast<int>(sampleRate_);
-                    take.interleaved.insert(take.interleaved.end(), interleavedIn, interleavedIn + frames * 2);
+                    if (RecSlot* rec = n->rec.load(std::memory_order_acquire)) {
+                        int pos = rec->used.load(std::memory_order_relaxed);
+                        if (pos + frames <= static_cast<int>(rec->samples.size()) / 2) {
+                            float* dst = rec->samples.data() + static_cast<size_t>(pos) * 2;
+                            std::memcpy(dst, interleavedIn, static_cast<size_t>(frames) * 2 * sizeof(float));
+                            rec->used.store(pos + frames, std::memory_order_release);
+                        }
+                    }
                 }
             }
-            if (n->type != TrackType::Midi || n->clips.empty() || !playing_.load()) {
-                MidiBuffer empty;
-                for (auto& d : n->devices) {
-                    if (n->type == TrackType::Midi && !n->clips.empty() && playing_.load())
-                        break;
-                    if (!d->bypass.load())
-                        d->process(buf, empty);
+            if (n->type == TrackType::Midi && n->arm.load()) {
+                int r = midiR_.load(std::memory_order_relaxed);
+                const int w = midiW_.load(std::memory_order_acquire);
+                while (r != w && n->midiIn.events.size() < n->midiIn.events.capacity()) {
+                    const LiveMidi e = midiRing_[r];
+                    int off = e.offset;
+                    if (off < 0)
+                        off = 0;
+                    if (off >= frames)
+                        off = frames - 1;
+                    n->midiIn.add(off, e.status, e.d1, e.d2);
+                    r = (r + 1) & 255;
                 }
+                midiR_.store(r, std::memory_order_release);
+            }
+            if (n->type == TrackType::Midi) {
+                fitBuffer(n->shaped, frames);
+                for (auto& d : n->devices)
+                    if (!d->bypass.load())
+                        d->process(n->shaped, n->midiIn);
+                buf.addFrom(n->shaped);
+            } else {
+                for (auto& d : n->devices)
+                    if (!d->bypass.load())
+                        d->process(buf, silentMidi_);
             }
         }
 
-        AudioBuffer post = buf;
+        fitBuffer(n->shaped, frames);
+        AudioBuffer& post = n->shaped;
         const bool audible = !n->mute.load() && !ancestorMuted(*g, n) &&
                              (!anySolo || n->solo.load() || ancestorSolo(*g, n) || descendantSolo(*g, n) ||
                               n->type == TrackType::Return);
@@ -428,37 +534,25 @@ void Engine::process(float* interleavedOut, const float* interleavedIn, int fram
         }
         if (audible) {
             for (auto& s : n->sends) {
-                auto it = returns.find(s->target);
-                if (it == returns.end())
+                auto* ret = g->find(s->target);
+                if (!ret)
                     continue;
                 const float sg = dbToGain(s->db.load());
                 const AudioBuffer& tap = s->pre.load() ? buf : post;
-                it->second.addFrom(tap, sg);
+                ret->work.addFrom(tap, sg);
             }
         }
-        const float pk = post.peak();
-        float m = n->meter.load();
-        m = std::max(pk, m * 0.92f);
-        n->meter.store(m);
-        return post;
+        rememberPeak(n, post.peak());
     };
 
-    for (const auto& lane : g->automation) {
-        if (lane.id.rfind("track:", 0) == 0) {
-            const auto rest = lane.id.substr(6);
-            const auto colon = rest.rfind(':');
-            if (colon == std::string::npos)
-                continue;
-            const auto tid = rest.substr(0, colon);
-            const auto what = rest.substr(colon + 1);
-            if (auto* n = g->find(tid)) {
-                const float v = evalLane(lane, playhead_.load());
-                if (what == "gain")
-                    n->volumeDb.store(v);
-                else if (what == "pan")
-                    n->pan.store(v);
-            }
-        }
+    for (const auto& apply : g->autos) {
+        if (!apply.node)
+            continue;
+        const float v = evalPoints(apply.points, playhead_.load());
+        if (apply.kind == 0)
+            apply.node->volumeDb.store(v);
+        else
+            apply.node->pan.store(v);
     }
 
     for (auto& n : g->nodes) {
@@ -466,34 +560,35 @@ void Engine::process(float* interleavedOut, const float* interleavedIn, int fram
             continue;
         if (!n->output.empty() && n->output != "master")
             continue;
-        AudioBuffer b = render(n.get());
+        render(render, n.get());
         const bool leaf = n->type == TrackType::Audio || n->type == TrackType::Midi;
-        if (leaf)
-            delayWriteAdd(delays_[n->id], b, master, std::max(0, maxRoute - routeOf(*g, n.get())));
+        if (leaf && n->delay)
+            delayWriteAdd(*n->delay, n->shaped, mix_, std::max(0, maxRoute - routeOf(*g, n.get())));
         else
-            master.addFrom(b);
+            mix_.addFrom(n->shaped);
     }
     for (auto& n : g->nodes) {
         if (n->type != TrackType::Return)
             continue;
-        AudioBuffer buf = returns[n->id];
-        MidiBuffer empty;
+        AudioBuffer& buf = n->work;
         for (auto& d : n->devices)
             if (!d->bypass.load())
-                d->process(buf, empty);
+                d->process(buf, silentMidi_);
         const float vol = dbToGain(n->volumeDb.load());
         for (int i = 0; i < frames; ++i) {
             buf.ch(0)[i] *= vol;
             buf.ch(1)[i] *= vol;
         }
-        delayWriteAdd(delays_[n->id], buf, master, std::max(0, maxRoute - routeOf(*g, n.get())));
-        n->meter.store(std::max(buf.peak(), n->meter.load() * 0.92f));
+        if (n->delay)
+            delayWriteAdd(*n->delay, buf, mix_, std::max(0, maxRoute - routeOf(*g, n.get())));
+        else
+            mix_.addFrom(buf);
+        rememberPeak(n.get(), buf.peak());
     }
     if (auto* mnode = g->find("master")) {
-        MidiBuffer empty;
         for (auto& d : mnode->devices)
             if (!d->bypass.load())
-                d->process(master, empty);
+                d->process(mix_, silentMidi_);
         const float vol = dbToGain(mnode->volumeDb.load());
         float gL = 1.f, gR = 1.f;
         // Channel strips use equal-power pan. The master at center stays at unity
@@ -501,10 +596,10 @@ void Engine::process(float* interleavedOut, const float* interleavedIn, int fram
         if (std::abs(mnode->pan.load()) > 1.0e-4f)
             panGains(mnode->pan.load(), gL, gR);
         for (int i = 0; i < frames; ++i) {
-            master.ch(0)[i] *= vol * gL;
-            master.ch(1)[i] *= vol * gR;
+            mix_.ch(0)[i] *= vol * gL;
+            mix_.ch(1)[i] *= vol * gR;
         }
-        mnode->meter.store(std::max(master.peak(), mnode->meter.load() * 0.92f));
+        rememberPeak(mnode, mix_.peak());
     }
 
     if (g->metronome && playing_.load()) {
@@ -521,16 +616,16 @@ void Engine::process(float* interleavedOut, const float* interleavedIn, int fram
             for (int i = 0; i < len; ++i) {
                 const float env = 1.f - static_cast<float>(i) / len;
                 const float y = std::sin(6.2831853f * freq * i / static_cast<float>(sampleRate_)) * env * g->metronomeLevel;
-                master.ch(0)[s + i] += y;
-                master.ch(1)[s + i] += y;
+                mix_.ch(0)[s + i] += y;
+                mix_.ch(1)[s + i] += y;
             }
         }
     }
 
     if (interleavedOut) {
         for (int i = 0; i < frames; ++i) {
-            interleavedOut[i * 2] = master.ch(0)[i];
-            interleavedOut[i * 2 + 1] = master.ch(1)[i];
+            interleavedOut[i * 2] = mix_.ch(0)[i];
+            interleavedOut[i * 2 + 1] = mix_.ch(1)[i];
         }
     }
     if (playing_.load()) {
@@ -538,14 +633,17 @@ void Engine::process(float* interleavedOut, const float* interleavedIn, int fram
         if (g->loop && q >= g->loopEnd)
             q = g->loopStart + std::fmod(q - g->loopStart, std::max(0.01, g->loopEnd - g->loopStart));
         playhead_.store(q);
-        if (project_)
-            project_->playhead = q;
     }
-    const auto t1 = std::chrono::steady_clock::now();
-    const double used = std::chrono::duration<double>(t1 - t0).count();
-    const double budget = frames / sampleRate_;
-    const float load = static_cast<float>(used / std::max(1e-9, budget));
-    cpu_.store(cpu_.load() * 0.8f + load * 0.2f);
+    releaseGraph();
+}
+
+void Engine::pushMidi(int sampleOffset, uint8_t status, uint8_t data1, uint8_t data2) {
+    const int w = midiW_.load(std::memory_order_relaxed);
+    const int next = (w + 1) & 255;
+    if (next == midiR_.load(std::memory_order_acquire))
+        return;
+    midiRing_[w] = LiveMidi {sampleOffset, status, data1, data2};
+    midiW_.store(next, std::memory_order_release);
 }
 
 void Engine::play() { playing_.store(true); }
@@ -554,7 +652,27 @@ void Engine::stop() {
     recording_.store(false);
     finalizeTakes();
 }
-void Engine::setRecording(bool recording) { recording_.store(recording); }
+void Engine::setRecording(bool recording) {
+    if (recording && project_) {
+        Graph* g = acquire();
+        const int capFrames = static_cast<int>(sampleRate_) * 60;
+        for (const auto& t : project_->tracks) {
+            if (!t.arm)
+                continue;
+            auto slot = std::make_unique<RecSlot>();
+            slot->samples.assign(static_cast<size_t>(capFrames) * 2, 0.f);
+            slot->startQ = playhead_.load();
+            slot->rate = static_cast<int>(sampleRate_);
+            RecSlot* raw = slot.get();
+            recs_[t.id] = std::move(slot);
+            if (g)
+                if (auto* n = g->find(t.id))
+                    n->rec.store(raw, std::memory_order_release);
+        }
+        releaseGraph();
+    }
+    recording_.store(recording);
+}
 void Engine::seek(double quarters) {
     playhead_.store(quarters);
     if (project_)
@@ -562,66 +680,97 @@ void Engine::seek(double quarters) {
 }
 
 float Engine::meter(const std::string& trackId) const {
-    if (!graph_)
-        return 0.f;
-    for (auto& n : graph_->nodes)
-        if (n->id == trackId)
-            return n->meter.load();
-    return 0.f;
+    Graph* g = acquire();
+    float v = 0.f;
+    if (g)
+        for (auto& n : g->nodes)
+            if (n->id == trackId)
+                v = n->meter.load();
+    releaseGraph();
+    return v;
+}
+float Engine::holdMeter(const std::string& trackId) const {
+    Graph* g = acquire();
+    float v = 0.f;
+    if (g)
+        for (auto& n : g->nodes)
+            if (n->id == trackId)
+                v = n->hold.load();
+    releaseGraph();
+    return v;
+}
+bool Engine::clipLamp(const std::string& trackId) const {
+    Graph* g = acquire();
+    bool v = false;
+    if (g)
+        for (auto& n : g->nodes)
+            if (n->id == trackId)
+                v = n->clipLamp.load() != 0;
+    releaseGraph();
+    return v;
 }
 
-static Node* liveNode(const std::shared_ptr<Engine::Graph>& g, const std::string& id) {
+static Node* liveNode(Engine::Graph* g, const std::string& id) {
     if (!g)
         return nullptr;
-    for (auto& n : g->nodes)
-        if (n->id == id)
-            return n.get();
-    return nullptr;
+    return g->find(id);
 }
 
 void Engine::setVolumeDb(const std::string& track, float db) {
-    if (auto* n = liveNode(graph_, track))
+    Graph* g = acquire();
+    if (auto* n = liveNode(g, track))
         n->volumeDb.store(db);
+    releaseGraph();
     if (project_)
         if (auto* t = project_->findTrack(track))
             t->volumeDb = db;
 }
 void Engine::setPan(const std::string& track, float pan) {
-    if (auto* n = liveNode(graph_, track))
+    Graph* g = acquire();
+    if (auto* n = liveNode(g, track))
         n->pan.store(pan);
+    releaseGraph();
     if (project_)
         if (auto* t = project_->findTrack(track))
             t->pan = pan;
 }
 void Engine::setMute(const std::string& track, bool v) {
-    if (auto* n = liveNode(graph_, track))
+    Graph* g = acquire();
+    if (auto* n = liveNode(g, track))
         n->mute.store(v);
+    releaseGraph();
     if (project_)
         if (auto* t = project_->findTrack(track))
             t->mute = v;
 }
 void Engine::setSolo(const std::string& track, bool v) {
-    if (auto* n = liveNode(graph_, track))
+    Graph* g = acquire();
+    if (auto* n = liveNode(g, track))
         n->solo.store(v);
+    releaseGraph();
     if (project_)
         if (auto* t = project_->findTrack(track))
             t->solo = v;
 }
 void Engine::setArm(const std::string& track, bool v) {
-    if (auto* n = liveNode(graph_, track))
+    Graph* g = acquire();
+    if (auto* n = liveNode(g, track))
         n->arm.store(v);
+    releaseGraph();
     if (project_)
         if (auto* t = project_->findTrack(track))
             t->arm = v;
 }
 void Engine::setSend(const std::string& track, const std::string& target, float db, bool pre) {
-    if (auto* n = liveNode(graph_, track)) {
+    Graph* g = acquire();
+    if (auto* n = liveNode(g, track)) {
         for (auto& s : n->sends)
             if (s->target == target) {
                 s->db.store(db);
                 s->pre.store(pre);
             }
     }
+    releaseGraph();
     if (project_)
         if (auto* t = project_->findTrack(track))
             for (auto& s : t->sends)
@@ -679,57 +828,71 @@ void Engine::setDeviceParam(const std::string& deviceId, const std::string& para
             s->params[param] = value;
 }
 Device* Engine::device(const std::string& id) {
-    if (!graph_)
-        return nullptr;
-    for (auto& n : graph_->nodes)
-        for (auto& d : n->devices)
-            if (d->id == id)
-                return d.get();
-    return nullptr;
+    Graph* g = acquire();
+    Device* found = nullptr;
+    if (g)
+        for (auto& n : g->nodes)
+            for (auto& d : n->devices)
+                if (d->id == id)
+                    found = d.get();
+    releaseGraph();
+    return found;
 }
 void Engine::launchScene(int scene) {
-    if (!graph_)
-        return;
-    for (auto& n : graph_->nodes) {
-        if (scene >= 0 && scene < static_cast<int>(n->slots.size()) && n->slots[scene]) {
-            n->sessionScene.store(scene);
-            n->sessionOrigin.store(playhead_.load());
+    Graph* g = acquire();
+    if (g) {
+        for (auto& n : g->nodes) {
+            if (scene >= 0 && scene < static_cast<int>(n->slots.size()) && n->slots[scene]) {
+                n->sessionScene.store(scene);
+                n->sessionOrigin.store(playhead_.load());
+            }
         }
     }
+    releaseGraph();
     play();
 }
 void Engine::launchSlot(const std::string& track, int scene) {
-    if (auto* n = liveNode(graph_, track)) {
+    Graph* g = acquire();
+    if (auto* n = liveNode(g, track)) {
         n->sessionScene.store(scene);
         n->sessionOrigin.store(playhead_.load());
     }
+    releaseGraph();
     play();
 }
 
 void Engine::finalizeTakes() {
     if (!project_)
         return;
-    std::lock_guard<std::mutex> lock(recMu_);
-    for (auto& kv : takes_) {
-        if (kv.second.interleaved.empty())
+    Graph* g = acquire();
+    if (g)
+        for (auto& n : g->nodes)
+            n->rec.store(nullptr, std::memory_order_release);
+    releaseGraph();
+    while (readers_.load(std::memory_order_acquire) != 0) {
+    }
+    for (auto& kv : recs_) {
+        RecSlot& take = *kv.second;
+        const int frames = take.used.load(std::memory_order_acquire);
+        if (frames <= 0)
             continue;
         auto media = std::make_shared<Media>();
         media->id = project_->newId("rec");
-        media->sampleRate = kv.second.rate;
+        media->sampleRate = take.rate;
         media->channels = 2;
-        media->interleaved = kv.second.interleaved;
+        media->interleaved.assign(take.samples.begin(), take.samples.begin() + static_cast<std::ptrdiff_t>(frames) * 2);
         project_->media[media->id] = media;
         if (auto* t = project_->findTrack(kv.first)) {
             Clip c;
             c.id = project_->newId("c");
             c.name = "Take";
-            c.startQ = 0;
-            c.lengthQ = media->interleaved.size() / 2.0 / (sampleRate_ * 60.0 / std::max(1.0, project_->bpm));
+            c.startQ = take.startQ;
+            c.lengthQ = frames / (sampleRate_ * 60.0 / std::max(1.0, project_->bpm));
             c.mediaId = media->id;
             t->clips.push_back(c);
         }
     }
-    takes_.clear();
+    recs_.clear();
     publish();
 }
 

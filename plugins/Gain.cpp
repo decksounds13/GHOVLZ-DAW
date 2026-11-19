@@ -1,6 +1,7 @@
 #include "public.sdk/source/main/pluginfactory.h"
 #include "public.sdk/source/vst/vstsinglecomponenteffect.h"
 #include "pluginterfaces/base/ibstream.h"
+#include "pluginterfaces/vst/ivstparameterchanges.h"
 
 #include <cstring>
 
@@ -30,8 +31,19 @@ public:
         return r;
     }
     tresult PLUGIN_API process(ProcessData& data) SMTG_OVERRIDE {
-        if (auto* p = parameters.getParameter(kGainId))
-            gain_ = static_cast<float>(p->getNormalized()) * 2.f;
+        if (data.inputParameterChanges) {
+            const int32 queues = data.inputParameterChanges->getParameterCount();
+            for (int32 i = 0; i < queues; ++i) {
+                auto* queue = data.inputParameterChanges->getParameterData(i);
+                if (!queue || queue->getParameterId() != kGainId || queue->getPointCount() < 1)
+                    continue;
+                int32 offset = 0;
+                ParamValue value = 0;
+                queue->getPoint(queue->getPointCount() - 1, offset, value);
+                gain_ = static_cast<float>(value) * 2.f;
+                setParamNormalized(kGainId, value);
+            }
+        }
         if (data.numSamples <= 0 || !data.inputs || !data.outputs)
             return kResultOk;
         const int32 chs = data.inputs[0].numChannels;

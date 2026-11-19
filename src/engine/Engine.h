@@ -6,7 +6,6 @@
 #include <atomic>
 #include <map>
 #include <memory>
-#include <mutex>
 #include <string>
 #include <vector>
 
@@ -26,6 +25,7 @@ public:
     std::shared_ptr<Project> project() const;
 
     void process(float* interleavedOut, const float* interleavedIn, int frames);
+    void pushMidi(int sampleOffset, uint8_t status, uint8_t data1, uint8_t data2);
 
     void play();
     void stop();
@@ -36,6 +36,8 @@ public:
     double playhead() const { return playhead_.load(); }
     float cpuLoad() const { return cpu_.load(); }
     float meter(const std::string& trackId) const;
+    float holdMeter(const std::string& trackId) const;
+    bool clipLamp(const std::string& trackId) const;
 
     void setVolumeDb(const std::string& track, float db);
     void setPan(const std::string& track, float pan);
@@ -62,14 +64,26 @@ public:
         int delay = -1;
         std::vector<float> data[2];
     };
+    struct RecSlot {
+        std::vector<float> samples;
+        std::atomic<int> used {0};
+        double startQ = 0;
+        int rate = 48000;
+        int channels = 2;
+    };
 
 private:
     void publish();
     void finalizeTakes();
     std::shared_ptr<Device> makeLive(const DeviceState& state);
 
+    Graph* acquire() const;
+    void releaseGraph() const;
+
     std::shared_ptr<Project> project_;
-    std::shared_ptr<Graph> graph_;
+    mutable std::atomic<Graph*> published_ {nullptr};
+    mutable std::atomic<int> readers_ {0};
+    std::vector<std::unique_ptr<Graph>> owned_;
     std::shared_ptr<PluginHost> plugins_;
     double sampleRate_ = 48000;
     int block_ = 512;
@@ -79,13 +93,19 @@ private:
     std::atomic<float> cpu_ {0};
     bool offline_ = false;
 
-    std::map<std::string, DelayLineState> delays_;
-    std::mutex recMu_;
-    struct Take {
-        std::vector<float> interleaved;
-        int rate = 48000;
+    struct LiveMidi {
+        int offset = 0;
+        uint8_t status = 0;
+        uint8_t d1 = 0;
+        uint8_t d2 = 0;
     };
-    std::map<std::string, Take> takes_;
+    AudioBuffer mix_;
+    MidiBuffer silentMidi_;
+    LiveMidi midiRing_[256] {};
+    std::atomic<int> midiW_ {0};
+    std::atomic<int> midiR_ {0};
+    std::map<std::string, DelayLineState> delays_;
+    std::map<std::string, std::unique_ptr<RecSlot>> recs_;
 };
 
 } // namespace ghovlz

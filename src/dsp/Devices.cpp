@@ -1,13 +1,16 @@
+// Provenance: dynamics, EQ, filters and the analyzer were re-expressed from
+// GHOVLZ-EQ (main, dyn/main, analyzer/main). The EQ repository does not
+// publish a license file. This is an internal port of the math, not a copy
+// of the original sources.
 #include "dsp/Devices.h"
 #include "dsp/Biquad.h"
 #include "dsp/Fft.h"
 
 #include <algorithm>
 #include <cmath>
+#include <atomic>
 #include <complex>
 #include <cstdlib>
-#include <deque>
-#include <mutex>
 
 namespace ghovlz {
 namespace {
@@ -26,6 +29,8 @@ Param P(const char* id, const char* name, float mn, float mx, float v, float ske
     p.minV = mn;
     p.maxV = mx;
     p.value = v;
+    p.target.store(v, std::memory_order_relaxed);
+    p.smoothed = v;
     p.skew = skew;
     return p;
 }
@@ -37,6 +42,8 @@ Param Choice(const char* id, const char* name, std::vector<std::string> choices,
     p.minV = 0.f;
     p.maxV = static_cast<float>(p.choices.size() - 1);
     p.value = index;
+    p.target.store(index, std::memory_order_relaxed);
+    p.smoothed = index;
     return p;
 }
 
@@ -51,9 +58,9 @@ public:
     void process(AudioBuffer& a, MidiBuffer&) override {
         if (bypass.load() || a.channels < 2)
             return;
-        const float g = dbToGain(get("gain"));
-        const float w = get("width");
-        const bool mono = get("mono") >= 0.5f;
+        const float g = dbToGain(at(0));
+        const float w = at(1);
+        const bool mono = at(2) >= 0.5f;
         float* l = a.ch(0);
         float* r = a.ch(1);
         for (int i = 0; i < a.frames; ++i) {
@@ -78,20 +85,23 @@ public:
                   P("drive", "Drive", 0, 24, 0),
                   P("mix", "Mix", 0, 1, 1)};
     }
-    void prepare(double sr, int) override { sampleRate = sr; z.clear(); }
+    void prepare(double sr, int) override { sampleRate = sr; z.assign(2, {}); }
     void process(AudioBuffer& a, MidiBuffer&) override {
         if (bypass.load())
             return;
-        const int kind = static_cast<int>(get("type"));
-        const float cut = get("cutoff");
-        const float q = std::max(0.2f, get("reso"));
-        const float drive = dbToGain(get("drive"));
-        const float mix = get("mix");
+        const int kind = static_cast<int>(at(0));
+        const float cut = at(1);
+        const float q = std::max(0.2f, at(2));
+        const float drive = dbToGain(at(3));
+        const float mix = at(4);
         Biquad proto = kind == 1 ? Biquad::highPass(sampleRate, cut, q)
                      : kind == 2 ? Biquad::bandPass(sampleRate, cut, q)
                                  : Biquad::lowPass(sampleRate, cut, q);
-        if (static_cast<int>(z.size()) < a.channels)
+        if (static_cast<int>(z.size()) < a.channels) {
+            if (rtGuardActive())
+                rtGuardHit("filter-state");
             z.resize(a.channels);
+        }
         for (int c = 0; c < a.channels; ++c) {
             Biquad b = proto;
             b.z1 = z[c].z1;
@@ -160,13 +170,13 @@ public:
     }
 
     void processComp(AudioBuffer& a) {
-        const float thr = get("threshold");
-        const float ratio = std::max(1.f, get("ratio"));
-        const float atk = coeff(get("attack"), sampleRate);
-        const float rel = coeff(get("release"), sampleRate);
-        const float knee = get("knee");
-        const float makeup = dbToGain(get("makeup"));
-        const float mix = get("mix");
+        const float thr = at(0);
+        const float ratio = std::max(1.f, at(1));
+        const float atk = coeff(at(2), sampleRate);
+        const float rel = coeff(at(3), sampleRate);
+        const float knee = at(4);
+        const float makeup = dbToGain(at(5));
+        const float mix = at(6);
         float* l = a.ch(0);
         float* r = a.channels > 1 ? a.ch(1) : l;
         for (int i = 0; i < a.frames; ++i) {
@@ -190,10 +200,10 @@ public:
         }
     }
     void processGate(AudioBuffer& a) {
-        const float thr = dbToGain(get("threshold"));
-        const float atk = coeff(get("attack"), sampleRate);
-        const float rel = coeff(get("release"), sampleRate);
-        const float floorG = dbToGain(get("range"));
+        const float thr = dbToGain(at(0));
+        const float atk = coeff(at(1), sampleRate);
+        const float rel = coeff(at(2), sampleRate);
+        const float floorG = dbToGain(at(3));
         float* l = a.ch(0);
         float* r = a.channels > 1 ? a.ch(1) : l;
         for (int i = 0; i < a.frames; ++i) {
@@ -208,7 +218,7 @@ public:
         }
     }
     void processLim(AudioBuffer& a) {
-        const int want = static_cast<int>(std::round(get("lookahead") * 0.001 * sampleRate));
+        const int want = static_cast<int>(std::round(at(1) * 0.001 * sampleRate));
         if (want != lat) {
             lat = want;
             capN = std::max(8, lat + a.frames + 8);
@@ -218,8 +228,8 @@ public:
             w = 0;
             env = 1.f;
         }
-        const float ceiling = dbToGain(get("ceiling"));
-        const float rel = coeff(get("release"), sampleRate);
+        const float ceiling = dbToGain(at(0));
+        const float rel = coeff(at(2), sampleRate);
         float* l = a.ch(0);
         float* r = a.channels > 1 ? a.ch(1) : l;
         for (int i = 0; i < a.frames; ++i) {
@@ -267,11 +277,11 @@ public:
     void process(AudioBuffer& a, MidiBuffer&) override {
         if (bypass.load())
             return;
-        const float drive = dbToGain(get("drive"));
+        const float drive = dbToGain(at(0));
         const float norm = std::tanh(drive);
-        const float tone = get("tone");
-        const float mix = get("mix");
-        const float outG = dbToGain(get("output"));
+        const float tone = at(1);
+        const float mix = at(2);
+        const float outG = dbToGain(at(3));
         const float pole = std::exp(-2.f * kPi * 1200.f / static_cast<float>(sampleRate));
         for (int c = 0; c < a.channels; ++c) {
             float* x = a.ch(c);
@@ -309,10 +319,10 @@ public:
     void process(AudioBuffer& a, MidiBuffer&) override {
         if (bypass.load() || cap <= 0)
             return;
-        int delaySamp = static_cast<int>(get("timeMs") * 0.001 * sampleRate);
+        int delaySamp = static_cast<int>(at(0) * 0.001 * sampleRate);
         delaySamp = std::clamp(delaySamp, 1, cap - 1);
-        const float fb = get("feedback");
-        const float mix = get("mix");
+        const float fb = at(1);
+        const float mix = at(2);
         for (int i = 0; i < a.frames; ++i) {
             const int r = (w - delaySamp + cap) % cap;
             for (int c = 0; c < std::min(2, a.channels); ++c) {
@@ -352,9 +362,9 @@ public:
     void process(AudioBuffer& a, MidiBuffer&) override {
         if (bypass.load() || a.channels < 1)
             return;
-        const float mix = get("mix");
-        const float feedback = 0.55f + 0.4f * get("size");
-        const float damp = get("damp");
+        const float mix = at(2);
+        const float feedback = 0.55f + 0.4f * at(0);
+        const float damp = at(1);
         float* l = a.ch(0);
         float* r = a.channels > 1 ? a.ch(1) : l;
         for (int i = 0; i < a.frames; ++i) {
@@ -417,10 +427,10 @@ public:
     void process(AudioBuffer& a, MidiBuffer&) override {
         if (bypass.load())
             return;
-        const float rate = get("rate");
-        const float depth = get("depth");
-        const float mix = get("mix");
-        const float fb = kind == Flanger ? get("feedback") : 0.f;
+        const float rate = at(0);
+        const float depth = at(1);
+        const float mix = at(kind == Flanger ? 3 : 2);
+        const float fb = kind == Flanger ? at(2) : 0.f;
         for (int i = 0; i < a.frames; ++i) {
             phase += 2.f * kPi * rate / static_cast<float>(sampleRate);
             if (phase > 2.f * kPi)
@@ -484,8 +494,8 @@ public:
         if (bypass.load())
             return;
         if (kind == Vel) {
-            const float scale = get("scale");
-            const int off = static_cast<int>(get("offset"));
+            const float scale = at(0);
+            const int off = static_cast<int>(at(1));
             for (auto& e : midi.events) {
                 if (e.isNoteOn() || e.isNoteOff()) {
                     int v = std::clamp(static_cast<int>(e.data2 * scale + off), 1, 127);
@@ -497,7 +507,7 @@ public:
             return;
         }
         if (kind == Chord) {
-            const int mode = static_cast<int>(get("mode"));
+            const int mode = static_cast<int>(at(0));
             const int iv[3][2] = {{4, 7}, {3, 7}, {7, 12}};
             std::vector<MidiEvent> extra;
             for (const auto& e : midi.events) {
@@ -512,7 +522,7 @@ public:
             midi.events.insert(midi.events.end(), extra.begin(), extra.end());
             return;
         }
-        const double quartersPerStep = 4.0 / std::max(1.f, get("rate"));
+        const double quartersPerStep = 4.0 / std::max(1.f, at(0));
         const int stepSamples = std::max(1, static_cast<int>(quartersPerStep * sampleRate * 60.0 / 120.0));
         for (const auto& e : midi.events) {
             if (e.isNoteOn())
@@ -526,7 +536,7 @@ public:
         countdown -= std::max(1, audio.frames);
         if (countdown <= 0) {
             countdown = stepSamples;
-            const int oct = static_cast<int>(get("octaves"));
+            const int oct = static_cast<int>(at(1));
             const int idx = step % static_cast<int>(held.size() * std::max(1, oct));
             const int note = held[idx % held.size()] + 12 * (idx / static_cast<int>(held.size()));
             midi.add(0, 0x90, static_cast<uint8_t>(std::clamp(note, 0, 127)), 100);
@@ -577,17 +587,17 @@ public:
             return;
         }
         a.clear();
-        const float level = get("level");
-        const float cut = get("cutoff");
-        const float q = get("resonance");
+        const float level = at(9);
+        const float cut = at(3);
+        const float q = at(4);
         Biquad filt = Biquad::lowPass(sampleRate, cut, q);
-        const float atk = std::max(0.001f, get("attack"));
-        const float dec = std::max(0.01f, get("decay"));
-        const float sus = get("sustain");
-        const float rel = std::max(0.01f, get("release"));
-        const int uni = std::clamp(static_cast<int>(std::round(get("unison"))), 1, 7);
-        const float pos = get("position");
-        const float wave = get("wave");
+        const float atk = std::max(0.001f, at(5));
+        const float dec = std::max(0.01f, at(6));
+        const float sus = at(7);
+        const float rel = std::max(0.01f, at(8));
+        const int uni = std::clamp(static_cast<int>(std::round(at(2))), 1, 7);
+        const float pos = at(0);
+        const float wave = at(1);
         float* l = a.ch(0);
         float* r = a.channels > 1 ? a.ch(1) : nullptr;
         for (int i = 0; i < a.frames; ++i) {
@@ -690,11 +700,11 @@ public:
             midi.clear();
             return;
         }
-        const float root = get("root") + get("tune");
+        const float root = at(0) + at(1);
         const float ratio = std::pow(2.f, (note - root) / 12.f) * (48000.f / static_cast<float>(sampleRate));
-        const float atk = std::max(1.f, get("attack") * static_cast<float>(sampleRate));
-        const float rel = std::max(1.f, get("release") * static_cast<float>(sampleRate));
-        const float level = get("level");
+        const float atk = std::max(1.f, at(2) * static_cast<float>(sampleRate));
+        const float rel = std::max(1.f, at(3) * static_cast<float>(sampleRate));
+        const float level = at(4);
         float* l = a.ch(0);
         float* r = a.channels > 1 ? a.ch(1) : nullptr;
         for (int i = 0; i < a.frames; ++i) {
@@ -751,8 +761,8 @@ public:
         if (bypass.load())
             return;
         a.clear();
-        const float level = get("level");
-        const float tone = 80.f + get("tone") * 200.f;
+        const float level = at(0);
+        const float tone = 80.f + at(1) * 200.f;
         float* l = a.ch(0);
         float* r = a.channels > 1 ? a.ch(1) : nullptr;
         for (int i = 0; i < a.frames; ++i) {
@@ -831,10 +841,10 @@ public:
         if (bypass.load() || a.channels < 1)
             return;
         design();
-        const bool linear = get("phase") >= 0.5f;
+        const bool linear = at(40) >= 0.5f;
         lat = linear ? 512 : 0;
-        const bool side = get("side") >= 0.5f;
-        const float amt = get("sideAmt");
+        const bool side = at(41) >= 0.5f;
+        const float amt = at(42);
         if (side && a.channels > 1)
             encodeSide(a, amt, true);
         if (linear)
@@ -845,19 +855,18 @@ public:
             encodeSide(a, amt, false);
     }
     void design() {
-        const float lfo = get("lfoDepth") > 0.001f
-                              ? std::sin(lfoPhase) * get("lfoDepth")
-                              : 0.f;
+        const float lfoDepth = at(46);
+        const float lfo = lfoDepth > 0.001f ? std::sin(lfoPhase) * lfoDepth : 0.f;
         lfoPhase += 0.01f;
         for (int i = 0; i < kBands; ++i) {
-            const std::string n = std::to_string(i + 1);
-            const bool on = get("on" + n) >= 0.5f;
-            const int ty = static_cast<int>(get("type" + n));
-            float freq = get("freq" + n);
+            const int base = i * 5;
+            const bool on = at(base) >= 0.5f;
+            const int ty = static_cast<int>(at(base + 1));
+            float freq = at(base + 2);
             if (i == 2)
                 freq *= std::pow(2.f, lfo);
-            const float g = get("gain" + n);
-            const float q = std::max(0.1f, get("q" + n));
+            const float g = at(base + 3);
+            const float q = std::max(0.1f, at(base + 4));
             Biquad b;
             if (!on)
                 b = Biquad{};
@@ -877,7 +886,7 @@ public:
                 b = Biquad::peak(sampleRate, freq, q, g);
             proto[i] = b;
         }
-        if (get("phase") >= 0.5f)
+        if (at(40) >= 0.5f)
             buildIr();
         designed = true;
     }
@@ -954,17 +963,33 @@ public:
     void encodeSide(AudioBuffer& a, float amount, bool into) {
         float* l = a.ch(0);
         float* r = a.ch(1);
-        Biquad hpF = Biquad::highPass(sampleRate, get("sideHp"), 0.7f);
-        Biquad lpF = Biquad::lowPass(sampleRate, get("sideLp"), 0.7f);
-        for (int i = 0; i < a.frames; ++i) {
-            if (into) {
+        if (into) {
+            for (int i = 0; i < a.frames; ++i) {
                 const float mid = 0.5f * (l[i] + r[i]);
-                float side = 0.5f * (l[i] - r[i]);
-                side = lpF.tick(hpF.tick(side));
-                side *= amount;
-                l[i] = mid + side;
-                r[i] = mid - side;
+                const float side = 0.5f * (l[i] - r[i]);
+                l[i] = mid;
+                r[i] = side;
             }
+            return;
+        }
+        const float hpHz = at(43);
+        const float lpHz = at(44);
+        const bool color = amount > 0.001f && (hpHz > 21.f || lpHz < 17900.f);
+        if (color) {
+            Biquad hp = Biquad::highPass(sampleRate, hpHz, 0.7f);
+            Biquad lp = Biquad::lowPass(sampleRate, lpHz, 0.7f);
+            sideHpF.b0 = hp.b0; sideHpF.b1 = hp.b1; sideHpF.b2 = hp.b2; sideHpF.a1 = hp.a1; sideHpF.a2 = hp.a2;
+            sideLpF.b0 = lp.b0; sideLpF.b1 = lp.b1; sideLpF.b2 = lp.b2; sideLpF.a1 = lp.a1; sideLpF.a2 = lp.a2;
+        }
+        for (int i = 0; i < a.frames; ++i) {
+            const float mid = l[i];
+            float side = r[i];
+            if (color) {
+                const float filtered = sideLpF.tick(sideHpF.tick(side));
+                side = side * (1.f - amount) + filtered * amount;
+            }
+            l[i] = mid + side;
+            r[i] = mid - side;
         }
     }
 
@@ -977,6 +1002,7 @@ public:
     Biquad filters[2][kBands];
     std::vector<float> fir;
     std::vector<float> hist[2];
+    Biquad sideHpF, sideLpF;
 };
 
 class DynDevice : public Device {
@@ -987,6 +1013,9 @@ public:
         params = {P("bands", "Bands", 1, 6, 3),
                   P("f1", "Split 1", 40, 2000, 120, 0.4f),
                   P("f2", "Split 2", 80, 8000, 2000, 0.4f),
+                  P("f3", "Split 3", 200, 12000, 4000, 0.4f),
+                  P("f4", "Split 4", 400, 16000, 8000, 0.4f),
+                  P("f5", "Split 5", 800, 18000, 12000, 0.4f),
                   P("threshold", "Threshold", -60, 0, -18),
                   P("ratio", "Ratio", 1, 20, 4),
                   P("attack", "Attack", 0.1f, 200, 12),
@@ -994,49 +1023,58 @@ public:
                   P("knee", "Knee", 0, 24, 8),
                   P("makeup", "Makeup", -12, 24, 0),
                   P("mix", "Mix", 0, 1, 1)};
-        for (int i = 0; i < 3; ++i)
-            env[i] = 0.f;
     }
     void prepare(double sr, int) override {
         sampleRate = sr;
-        for (auto& e : env) e = 0.f;
-        for (auto& f : split) f.reset();
+        for (auto& row : env)
+            for (float& e : row)
+                e = 0.f;
+        for (auto& row : split)
+            for (auto& f : row)
+                f.reset();
     }
     void process(AudioBuffer& a, MidiBuffer&) override {
         if (bypass.load() || a.channels < 1)
             return;
-        const float f1 = get("f1");
-        const float f2 = std::max(get("f2"), f1 * 1.2f);
-        const float thr = get("threshold");
-        const float ratio = std::max(1.f, get("ratio"));
-        const float atk = coeff(get("attack"), sampleRate);
-        const float rel = coeff(get("release"), sampleRate);
-        const float makeup = dbToGain(get("makeup"));
-        const float mix = get("mix");
-        Biquad lp1 = Biquad::lowPass(sampleRate, f1, 0.707f);
-        Biquad lp1b = lp1;
-        Biquad hp1 = Biquad::highPass(sampleRate, f1, 0.707f);
-        Biquad hp1b = hp1;
-        Biquad lp2 = Biquad::lowPass(sampleRate, f2, 0.707f);
-        Biquad lp2b = lp2;
-        Biquad hp2 = Biquad::highPass(sampleRate, f2, 0.707f);
-        Biquad hp2b = hp2;
+        const int bands = std::clamp(static_cast<int>(std::lround(at(0))), 1, 6);
+        float freq[5] = {at(1), at(2), at(3), at(4), at(5)};
+        for (int s = 1; s < 5; ++s)
+            freq[s] = std::max(freq[s], freq[s - 1] * 1.2f);
+        const float thr = at(6);
+        const float ratio = std::max(1.f, at(7));
+        const float atk = coeff(at(8), sampleRate);
+        const float rel = coeff(at(9), sampleRate);
+        const float makeup = dbToGain(at(11));
+        const float mix = at(12);
         for (int c = 0; c < std::min(2, a.channels); ++c) {
+            for (int s = 0; s < bands - 1; ++s) {
+                Biquad lp = Biquad::lowPass(sampleRate, freq[s], 0.707f);
+                split[c][s].b0 = lp.b0;
+                split[c][s].b1 = lp.b1;
+                split[c][s].b2 = lp.b2;
+                split[c][s].a1 = lp.a1;
+                split[c][s].a2 = lp.a2;
+            }
             float* x = a.ch(c);
             for (int i = 0; i < a.frames; ++i) {
                 const float dry = x[i];
-                float low = lp1b.tick(lp1.tick(dry));
-                float mid = lp2b.tick(lp2.tick(hp1b.tick(hp1.tick(dry))));
-                float high = hp2b.tick(hp2.tick(dry));
-                float bands[3] = {low, mid, high};
+                float rest = dry;
+                float parts[6] {};
+                for (int b = 0; b < bands - 1; ++b) {
+                    const float low = split[c][b].tick(rest);
+                    parts[b] = low;
+                    rest -= low;
+                }
+                parts[bands - 1] = rest;
                 float sum = 0.f;
-                for (int b = 0; b < 3; ++b) {
-                    const float peak = std::abs(bands[b]);
-                    const float cf = peak > env[b] ? atk : rel;
-                    env[b] += cf * (peak - env[b]);
-                    float over = gainToDb(env[b]) - thr;
-                    float gr = over > 0.f ? over * (1.f - 1.f / ratio) : 0.f;
-                    sum += bands[b] * dbToGain(-gr);
+                for (int b = 0; b < bands; ++b) {
+                    const float peak = std::abs(parts[b]);
+                    float& e = env[c][b];
+                    const float cf = peak > e ? atk : rel;
+                    e += cf * (peak - e);
+                    const float over = gainToDb(e) - thr;
+                    const float gr = over > 0.f ? over * (1.f - 1.f / ratio) : 0.f;
+                    sum += parts[b] * dbToGain(-gr);
                 }
                 sum *= makeup;
                 x[i] = dry * (1.f - mix) + sum * mix;
@@ -1044,8 +1082,8 @@ public:
         }
     }
     double sampleRate = 48000;
-    float env[3] {};
-    Biquad split[8];
+    float env[2][6] {};
+    Biquad split[2][5];
 };
 
 class Analyzer : public Device {
@@ -1057,89 +1095,100 @@ public:
     }
     void prepare(double sr, int) override {
         sampleRate = sr;
-        acc.clear();
+        accCount = 0;
+        acc.resize(2048);
         scopePos = 0;
         k1 = Biquad::highShelf(sr, 1682.f, 0.7f, 4.f);
         k2 = Biquad::highPass(sr, 38.f, 0.5f);
-        moment.clear();
-        snap = {};
+        momentCap = std::max(8, static_cast<int>(sr * 0.4));
+        moment.assign(static_cast<size_t>(momentCap), 0.f);
+        momentPos = 0;
+        momentFill = 0;
+        spec.assign(2048, {});
+        for (auto& s : slots)
+            s = {};
     }
     void process(AudioBuffer& a, MidiBuffer&) override {
         if (a.channels < 1)
             return;
-        const float g = bypass.load() ? 1.f : dbToGain(get("gain"));
+        if (acc.size() < 2048)
+            acc.resize(2048);
+        if (spec.size() < 2048)
+            spec.resize(2048);
+        const float g = bypass.load() ? 1.f : dbToGain(at(0));
         float* l = a.ch(0);
         float* r = a.channels > 1 ? a.ch(1) : l;
         float peak = 0.f;
-        double sumSq = 0.0;
         double corrN = 0, corrL = 0, corrR = 0;
         for (int i = 0; i < a.frames; ++i) {
             l[i] *= g;
             if (a.channels > 1)
                 r[i] *= g;
             const float mid = 0.5f * (l[i] + (a.channels > 1 ? r[i] : l[i]));
-            acc.push_back(mid);
+            acc[static_cast<size_t>(accCount++)] = mid;
             scope[scopePos] = mid;
             scopePos = (scopePos + 1) % 512;
             peak = std::max(peak, std::max(std::abs(l[i]), std::abs(a.channels > 1 ? r[i] : l[i])));
             const float kw = k2.tick(k1.tick(mid));
-            moment.push_back(kw * kw);
+            if (momentCap > 0) {
+                moment[static_cast<size_t>(momentPos)] = kw * kw;
+                momentPos = (momentPos + 1) % momentCap;
+                if (momentFill < momentCap)
+                    ++momentFill;
+            }
             if (a.channels > 1) {
                 corrN += l[i] * r[i];
                 corrL += l[i] * l[i];
                 corrR += r[i] * r[i];
             }
-            sumSq += kw * kw;
-        }
-        while (static_cast<int>(moment.size()) > static_cast<int>(sampleRate * 0.4))
-            moment.pop_front();
-        if (static_cast<int>(acc.size()) >= 2048) {
-            std::vector<std::complex<float>> spec(2048);
-            const int start = static_cast<int>(acc.size()) - 2048;
-            for (int i = 0; i < 2048; ++i) {
-                const float w = 0.5f * (1.f - std::cos(2.f * kPi * i / 2047.f));
-                spec[i] = acc[start + i] * w;
+            if (accCount >= 2048) {
+                for (int n = 0; n < 2048; ++n) {
+                    const float w = 0.5f * (1.f - std::cos(2.f * kPi * n / 2047.f));
+                    spec[static_cast<size_t>(n)] = acc[static_cast<size_t>(n)] * w;
+                }
+                fftRadix2(spec, false);
+                const int slot = (published.load(std::memory_order_relaxed) + 1) % 3;
+                AnalyzerSnapshot& next = slots[slot];
+                for (int b = 0; b < 256; ++b) {
+                    const float f0 = 20.f * std::pow(1000.f, b / 256.f);
+                    const float f1 = 20.f * std::pow(1000.f, (b + 1) / 256.f);
+                    int i0 = std::clamp(static_cast<int>(f0 * 2048 / sampleRate), 1, 1023);
+                    int i1 = std::clamp(static_cast<int>(f1 * 2048 / sampleRate), i0 + 1, 1024);
+                    float m = 0.f;
+                    for (int k = i0; k < i1; ++k)
+                        m = std::max(m, std::abs(spec[static_cast<size_t>(k)]));
+                    const float db = gainToDb(m / 1024.f);
+                    next.spectrum[b] = std::clamp((db + 72.f) / 72.f, 0.f, 1.f);
+                }
+                for (int s = 0; s < 512; ++s)
+                    next.scope[s] = scope[(scopePos + s) % 512];
+                const double den = std::sqrt(std::max(1e-12, corrL * corrR));
+                next.correlation = a.channels > 1 ? static_cast<float>(corrN / den) : 1.f;
+                double ms = 0;
+                for (int s = 0; s < momentFill; ++s)
+                    ms += moment[static_cast<size_t>(s)];
+                ms /= std::max(1, momentFill);
+                next.momentaryLufs = -0.691f + 10.f * std::log10(static_cast<float>(std::max(1e-12, ms)));
+                next.peakDb = gainToDb(peak);
+                published.store(slot, std::memory_order_release);
+                accCount = 0;
             }
-            fftRadix2(spec, false);
-            AnalyzerSnapshot next = snap;
-            for (int b = 0; b < 256; ++b) {
-                const float f0 = 20.f * std::pow(1000.f, b / 256.f);
-                const float f1 = 20.f * std::pow(1000.f, (b + 1) / 256.f);
-                int i0 = std::clamp(static_cast<int>(f0 * 2048 / sampleRate), 1, 1023);
-                int i1 = std::clamp(static_cast<int>(f1 * 2048 / sampleRate), i0 + 1, 1024);
-                float m = 0.f;
-                for (int k = i0; k < i1; ++k)
-                    m = std::max(m, std::abs(spec[k]));
-                const float db = gainToDb(m / 1024.f);
-                next.spectrum[b] = std::clamp((db + 72.f) / 72.f, 0.f, 1.f);
-            }
-            for (int i = 0; i < 512; ++i)
-                next.scope[i] = scope[(scopePos + i) % 512];
-            const double den = std::sqrt(std::max(1e-12, corrL * corrR));
-            next.correlation = a.channels > 1 ? static_cast<float>(corrN / den) : 1.f;
-            double ms = 0;
-            for (float v : moment)
-                ms += v;
-            ms /= std::max<size_t>(1, moment.size());
-            next.momentaryLufs = -0.691f + 10.f * std::log10(static_cast<float>(std::max(1e-12, ms)));
-            next.peakDb = gainToDb(peak);
-            std::lock_guard<std::mutex> lock(mu);
-            snap = next;
-            acc.clear();
         }
     }
     AnalyzerSnapshot copy() const {
-        std::lock_guard<std::mutex> lock(mu);
-        return snap;
+        return slots[published.load(std::memory_order_acquire)];
     }
     double sampleRate = 48000;
     std::vector<float> acc;
-    std::deque<float> moment;
+    int accCount = 0;
+    std::vector<float> moment;
+    int momentCap = 0, momentPos = 0, momentFill = 0;
+    std::vector<std::complex<float>> spec;
     float scope[512] {};
     int scopePos = 0;
     Biquad k1, k2;
-    mutable std::mutex mu;
-    AnalyzerSnapshot snap;
+    AnalyzerSnapshot slots[3];
+    std::atomic<int> published {0};
 };
 
 class Missing : public Device {

@@ -1,14 +1,45 @@
+#include "audio/AudioSettings.h"
 #include "core/Types.h"
+#include "ui/Direct2DCanvas.h"
 #include "dsp/Devices.h"
 #include "engine/Engine.h"
 #include "host/PluginHost.h"
 #include "io/WavFile.h"
 #include "model/Project.h"
+#include "core/RtGuard.h"
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <atomic>
 #include <cmath>
+#include <cstdint>
+#include <cstdlib>
 #include <filesystem>
+#include <fstream>
+#include <new>
+#include <string>
+#include <thread>
 #include <vector>
+
+#if !defined(GHOVLZ_SANITIZER)
+void* operator new(std::size_t n) {
+    if (ghovlz::rtGuardActive())
+        ghovlz::rtGuardHit("new");
+    if (void* p = std::malloc(n ? n : 1))
+        return p;
+    throw std::bad_alloc();
+}
+void* operator new[](std::size_t n) { return operator new(n); }
+void* operator new(std::size_t n, std::align_val_t) { return operator new(n); }
+void* operator new[](std::size_t n, std::align_val_t a) { return operator new(n, a); }
+void operator delete(void* p) noexcept { std::free(p); }
+void operator delete[](void* p) noexcept { std::free(p); }
+void operator delete(void* p, std::size_t) noexcept { std::free(p); }
+void operator delete[](void* p, std::size_t) noexcept { std::free(p); }
+void operator delete(void* p, std::align_val_t) noexcept { std::free(p); }
+void operator delete[](void* p, std::align_val_t) noexcept { std::free(p); }
+void operator delete(void* p, std::size_t, std::align_val_t) noexcept { std::free(p); }
+void operator delete[](void* p, std::size_t, std::align_val_t) noexcept { std::free(p); }
+#endif
 #if defined(_WIN32)
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -215,4 +246,244 @@ TEST_CASE("vst3 scan blacklist and gain") {
     MidiBuffer midi; dev->process(a, midi);
     REQUIRE(a.peak() == Catch::Approx(0.25f).margin(0.03f));
     REQUIRE_FALSE(dev->pluginState().empty());
+}
+TEST_CASE("stress many tracks and devices") {
+    auto project = std::make_shared<Project>(Project::makeEmpty());
+    project->bpm = 128;
+    project->loop = true;
+    project->loopEnd = 16;
+    auto media = std::make_shared<Media>();
+    media->id = "m";
+    media->sampleRate = 48000;
+    media->channels = 2;
+    media->interleaved.assign(48000, 0.15f);
+    project->media["m"] = media;
+    for (int i = 0; i < 48; ++i) {
+        Track t;
+        t.id = "t" + std::to_string(i);
+        t.name = t.id;
+        t.type = TrackType::Audio;
+        t.volumeDb = -18.f;
+        for (const char* kind : {"filter", "saturator", "utility", "compressor"}) {
+            DeviceState d;
+            d.type = kind;
+            d.name = kind;
+            d.id = t.id + kind;
+            t.devices.push_back(d);
+        }
+        Clip clip;
+        clip.name = t.name;
+        clip.mediaId = "m";
+        clip.startQ = 0;
+        clip.lengthQ = 16;
+        t.clips.push_back(clip);
+        project->tracks.push_back(std::move(t));
+    }
+    Engine engine;
+    engine.setProject(project);
+    engine.prepare(48000, 256);
+    engine.play();
+    std::vector<float> out(512, 0.f);
+    for (int b = 0; b < 80; ++b) {
+        engine.process(out.data(), nullptr, 256);
+        for (float v : out)
+            REQUIRE(std::isfinite(v));
+    }
+    REQUIRE(std::abs(out[0]) < 8.f);
+}
+TEST_CASE("realtime guard is quiet on the showcase") {
+    auto project = std::make_shared<Project>(Project::makeShowcase());
+    Engine engine;
+    engine.setProject(project);
+    engine.prepare(48000, 256);
+    engine.seek(0);
+    engine.play();
+    rtGuardHits().store(0);
+    std::vector<float> out(512);
+    const int blocks = 48000 / 256 * 60 * 10;
+    for (int i = 0; i < blocks; ++i)
+        engine.process(out.data(), nullptr, 256);
+    REQUIRE(rtGuardHits().load() == 0);
+    REQUIRE(std::isfinite(out[0]));
+}
+TEST_CASE("graph republish during playback") {
+    auto project = std::make_shared<Project>(Project::makeShowcase());
+    Engine engine;
+    engine.setProject(project);
+    engine.prepare(48000, 256);
+    engine.play();
+    std::atomic<bool> run {true};
+    std::thread audio([&] {
+        std::vector<float> out(512);
+        while (run.load())
+            engine.process(out.data(), nullptr, 256);
+    });
+    for (int i = 0; i < 10000; ++i) {
+        project->tracks[0].volumeDb = -6.f + 0.0001f * static_cast<float>(i % 10);
+        engine.setProject(project);
+    }
+    run.store(false);
+    audio.join();
+    REQUIRE(std::isfinite(engine.playhead()));
+}
+TEST_CASE("dyn and sidecheck null at unity") {
+    auto dyn = createDevice("dyn");
+    dyn->set("ratio", 1.f);
+    dyn->set("mix", 1.f);
+    dyn->set("makeup", 0.f);
+    dyn->set("bands", 4.f);
+    dyn->prepare(48000, 256);
+    AudioBuffer dry(2, 256);
+    for (int i = 0; i < 256; ++i) {
+        dry.ch(0)[i] = 0.2f * std::sin(2.f * 3.14159265f * 440.f * i / 48000.f);
+        dry.ch(1)[i] = 0.15f * std::sin(2.f * 3.14159265f * 880.f * i / 48000.f);
+    }
+    AudioBuffer wet = dry;
+    MidiBuffer midi;
+    for (int b = 0; b < 8; ++b)
+        dyn->process(wet, midi);
+    float err = 0.f;
+    for (int i = 0; i < 256; ++i)
+        err = std::max(err, std::abs(wet.ch(0)[i] - dry.ch(0)[i]));
+    REQUIRE(err < 1.0e-5f);
+
+    auto eq = createDevice("eq");
+    eq->prepare(48000, 256);
+    for (int i = 1; i <= 8; ++i)
+        eq->set(("on" + std::to_string(i)).c_str(), 0.f);
+    eq->set("side", 1.f);
+    eq->set("sideAmt", 0.f);
+    AudioBuffer side = dry;
+    for (int b = 0; b < 4; ++b)
+        eq->process(side, midi);
+    err = 0.f;
+    for (int i = 0; i < 256; ++i) {
+        err = std::max(err, std::abs(side.ch(0)[i] - dry.ch(0)[i]));
+        err = std::max(err, std::abs(side.ch(1)[i] - dry.ch(1)[i]));
+    }
+    REQUIRE(err < 1.0e-5f);
+}
+TEST_CASE("midi instrument keeps sounding after the clip") {
+    auto project = std::make_shared<Project>(Project::makeEmpty());
+    project->bpm = 120;
+    Track t;
+    t.id = "lead";
+    t.type = TrackType::Midi;
+    t.volumeDb = 0;
+    DeviceState d;
+    d.type = "wavetable";
+    d.name = "Wavetable";
+    d.id = "wt";
+    t.devices.push_back(d);
+    Clip clip;
+    clip.startQ = 0;
+    clip.lengthQ = 0.05;
+    clip.notes.push_back(Note{0, 0.02, 60, 0.9f});
+    t.clips.push_back(clip);
+    project->tracks.push_back(t);
+    Engine engine;
+    engine.setProject(project);
+    engine.prepare(48000, 256);
+    engine.play();
+    std::vector<float> out(512);
+    engine.process(out.data(), nullptr, 256);
+    float during = 0;
+    for (float v : out)
+        during = std::max(during, std::abs(v));
+    for (int i = 0; i < 30; ++i)
+        engine.process(out.data(), nullptr, 256);
+    float after = 0;
+    for (float v : out)
+        after = std::max(after, std::abs(v));
+    REQUIRE(during > 0.01f);
+    REQUIRE(after > 0.001f);
+}
+TEST_CASE("project json round trip is identical") {
+    auto dir1 = fs::temp_directory_path() / "ghovlz-rt-a";
+    auto dir2 = fs::temp_directory_path() / "ghovlz-rt-b";
+    fs::remove_all(dir1);
+    fs::remove_all(dir2);
+    auto project = std::make_shared<Project>(Project::makeShowcase());
+    REQUIRE(project->saveToFolder(dir1.string()));
+    Project loaded;
+    REQUIRE(loaded.loadFromFolder(dir1.string()));
+    REQUIRE(loaded.saveToFolder(dir2.string()));
+    auto read = [](const fs::path& p) {
+        std::ifstream in(p);
+        return std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    };
+    REQUIRE(read(dir1 / "project.json") == read(dir2 / "project.json"));
+    fs::remove_all(dir1);
+    fs::remove_all(dir2);
+}
+TEST_CASE("fake device runs the engine") {
+    auto project = std::make_shared<Project>(Project::makeShowcase());
+    Engine engine;
+    engine.setProject(project);
+    FakeBackend device;
+    AudioSettings settings;
+    settings.backend = "fake";
+    settings.sampleRate = 44100;
+    settings.frames = 128;
+    settings.exclusive = true;
+    REQUIRE(device.open(&engine, settings));
+    REQUIRE(device.sampleRate() == 44100);
+    REQUIRE(device.frames() == 128);
+    device.pump(nullptr);
+    REQUIRE(std::isfinite(engine.playhead()));
+    device.noteStopped();
+    REQUIRE(device.needsReopen());
+    REQUIRE(device.recover());
+    REQUIRE_FALSE(device.needsReopen());
+}
+TEST_CASE("live midi reaches the armed instrument") {
+    auto project = std::make_shared<Project>(Project::makeEmpty());
+    Track t;
+    t.id = "keys";
+    t.type = TrackType::Midi;
+    t.arm = true;
+    t.volumeDb = 0;
+    DeviceState d;
+    d.type = "wavetable";
+    d.id = "wt";
+    t.devices.push_back(d);
+    project->tracks.push_back(t);
+    Engine engine;
+    engine.setProject(project);
+    engine.prepare(48000, 256);
+    engine.play();
+    engine.pushMidi(0, 0x90, 60, 110);
+    std::vector<float> out(512);
+    float peak = 0;
+    for (int i = 0; i < 8; ++i) {
+        engine.process(out.data(), nullptr, 256);
+        for (float v : out)
+            peak = std::max(peak, std::abs(v));
+    }
+    REQUIRE(peak > 0.01f);
+}
+TEST_CASE("recorded take starts at the playhead") {
+    auto project = std::make_shared<Project>(Project::makeEmpty());
+    Track t;
+    t.id = "audio";
+    t.type = TrackType::Audio;
+    t.arm = true;
+    project->tracks.push_back(t);
+    Engine engine;
+    engine.setProject(project);
+    engine.prepare(48000, 256);
+    engine.seek(16);
+    engine.play();
+    engine.setRecording(true);
+    std::vector<float> in(512, 0.2f);
+    std::vector<float> out(512);
+    engine.process(out.data(), in.data(), 256);
+    engine.stop();
+    REQUIRE(project->tracks[0].clips.size() == 1);
+    REQUIRE(project->tracks[0].clips[0].startQ == Catch::Approx(16.0));
+}
+TEST_CASE("dip extent at 100 150 and 200 percent") {
+    REQUIRE(dipExtent(1680, 96) == 1680);
+    REQUIRE(dipExtent(1680, 144) == 1120);
+    REQUIRE(dipExtent(1680, 192) == 840);
 }

@@ -4,10 +4,10 @@
 
 namespace ghovlz {
 
-// Internal builds may use Steinberg's ASIO SDK. That SDK is proprietary for
-// closed source; the GPLv3 alternative is not used. It is not fetched and it
-// is not linked in this tree. Windows audio is WASAPI through miniaudio.
-// A later configure step can compile an ASIO backend when ASIO_SDK_DIR is set.
+class Engine;
+
+// Our ASIO host. The Steinberg SDK is not in this repository. CMake downloads
+// it into the build tree, or GHOVLZ_ASIO_SDK_DIR points at a local copy.
 class AsioBackend {
 public:
     static bool sdkAvailable() {
@@ -18,14 +18,18 @@ public:
 #endif
     }
     static const char* licenseNote() {
-        return "Steinberg ASIO SDK: proprietary license for closed-source builds. "
-               "Not redistributed here. WASAPI is the default Windows backend.";
+        return "Steinberg ASIO SDK 2.3.4 is fetched at configure time or read from "
+               "GHOVLZ_ASIO_SDK_DIR. It is not committed. A closed-source release "
+               "still needs Steinberg's proprietary licence.";
     }
-    std::string open() const {
-        if (!sdkAvailable())
-            return "ASIO SDK not configured (set ASIO_SDK_DIR). Using WASAPI.";
-        return "ASIO backend compiled";
-    }
+    std::string open(Engine* engine, const std::string& device, int sampleRate, int frames);
+    void close();
+    bool running() const { return opened_; }
+    const char* name() const;
+
+private:
+    bool opened_ = false;
+    std::string name_;
 };
 
 } // namespace ghovlz

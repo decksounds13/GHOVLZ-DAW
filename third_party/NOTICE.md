@@ -19,7 +19,7 @@ Windows system libraries used by the app and not shipped here: Direct2D, DirectW
 
 ## Not fetched
 
-**ASIO SDK.** Proprietary Steinberg license for closed-source software. The GPLv3 variant is not used. The SDK is not in this repository and CMake does not download it. The shipping Windows backend is WASAPI. `src/audio/AsioBackend.h` records the license and the `ASIO_SDK_DIR` hook for a later optional backend.
+**ASIO SDK 2.3.4** (Steinberg Media Technologies). Not committed. On Windows, CMake downloads `ASIO-SDK_2.3.4_2025-10-15.zip` into the build tree, or `GHOVLZ_ASIO_SDK_DIR` points at a local tree that contains `common/asio.h`. The SDK's terms do not allow redistribution from this public repository. A closed-source binary that links ASIO still needs Steinberg's proprietary licence. WASAPI remains the default device. Our host is `src/audio/AsioBackend.cpp`. `tools/check_no_asio_sdk.py` fails the build if the SDK files are committed.
 
 ## Behavior ported, code not included
 

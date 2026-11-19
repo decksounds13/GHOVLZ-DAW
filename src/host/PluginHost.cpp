@@ -7,8 +7,13 @@
 #include "pluginterfaces/base/funknown.h"
 #include "pluginterfaces/vst/ivstaudioprocessor.h"
 #include "pluginterfaces/vst/ivsteditcontroller.h"
+#include "pluginterfaces/vst/ivstevents.h"
+#include "pluginterfaces/vst/ivstmessage.h"
+#include "pluginterfaces/vst/ivstparameterchanges.h"
 
+#include <chrono>
 #include <cstdint>
+#include <cstring>
 #include <fstream>
 #include <map>
 #include <sstream>
@@ -20,6 +25,8 @@
 #endif
 #include <windows.h>
 #else
+#include <poll.h>
+#include <signal.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #endif
@@ -97,11 +104,22 @@ int runProcess(const std::string& exe, const std::string& arg, std::string& outp
         CloseHandle(readPipe);
         return 127;
     }
+    const auto started = std::chrono::steady_clock::now();
     char buf[512];
     DWORD n = 0;
-    while (ReadFile(readPipe, buf, sizeof(buf), &n, nullptr) && n > 0)
-        output.append(buf, buf + n);
-    WaitForSingleObject(pi.hProcess, 20000);
+    while (true) {
+        DWORD avail = 0;
+        if (PeekNamedPipe(readPipe, nullptr, 0, nullptr, &avail, nullptr) && avail > 0 &&
+            ReadFile(readPipe, buf, sizeof(buf), &n, nullptr) && n > 0)
+            output.append(buf, buf + n);
+        const DWORD wait = WaitForSingleObject(pi.hProcess, 50);
+        if (wait == WAIT_OBJECT_0)
+            break;
+        if (std::chrono::steady_clock::now() - started > std::chrono::seconds(20)) {
+            TerminateProcess(pi.hProcess, 1);
+            break;
+        }
+    }
     DWORD code = 1;
     GetExitCodeProcess(pi.hProcess, &code);
     CloseHandle(pi.hThread);
@@ -123,20 +141,148 @@ int runProcess(const std::string& exe, const std::string& arg, std::string& outp
         _exit(127);
     }
     close(fds[1]);
+    const auto started = std::chrono::steady_clock::now();
     char buf[512];
-    ssize_t n = 0;
-    while ((n = ::read(fds[0], buf, sizeof(buf))) > 0)
-        output.append(buf, buf + n);
-    close(fds[0]);
-    int status = 1;
-    waitpid(pid, &status, 0);
-    if (WIFEXITED(status))
-        return WEXITSTATUS(status);
-    if (WIFSIGNALED(status))
-        return 128 + WTERMSIG(status);
-    return 1;
+    while (true) {
+        pollfd pfd {};
+        pfd.fd = fds[0];
+        pfd.events = POLLIN;
+        const int pr = poll(&pfd, 1, 200);
+        if (pr > 0 && (pfd.revents & POLLIN)) {
+            const ssize_t n = ::read(fds[0], buf, sizeof(buf));
+            if (n > 0)
+                output.append(buf, buf + n);
+            else {
+                int status = 0;
+                waitpid(pid, &status, 0);
+                close(fds[0]);
+                if (WIFEXITED(status))
+                    return WEXITSTATUS(status);
+                if (WIFSIGNALED(status))
+                    return 128 + WTERMSIG(status);
+                return 1;
+            }
+        }
+        int status = 0;
+        const pid_t done = waitpid(pid, &status, WNOHANG);
+        if (done == pid) {
+            ssize_t n = 0;
+            while ((n = ::read(fds[0], buf, sizeof(buf))) > 0)
+                output.append(buf, buf + n);
+            close(fds[0]);
+            if (WIFEXITED(status))
+                return WEXITSTATUS(status);
+            if (WIFSIGNALED(status))
+                return 128 + WTERMSIG(status);
+            return 1;
+        }
+        if (std::chrono::steady_clock::now() - started > std::chrono::seconds(20)) {
+            kill(pid, SIGKILL);
+            waitpid(pid, &status, 0);
+            close(fds[0]);
+            return 128 + SIGKILL;
+        }
+    }
 #endif
 }
+
+class FixedParamQueue final : public Steinberg::Vst::IParamValueQueue {
+public:
+    Steinberg::Vst::ParamID pid = 0;
+    int count = 0;
+    Steinberg::int32 offsets[8] {};
+    Steinberg::Vst::ParamValue values[8] {};
+    Steinberg::tresult PLUGIN_API queryInterface(const Steinberg::TUID iid, void** obj) override {
+        const Steinberg::FUID id = Steinberg::FUID::fromTUID(iid);
+        if (id == Steinberg::Vst::IParamValueQueue::iid || id == Steinberg::FUnknown::iid) {
+            *obj = static_cast<Steinberg::Vst::IParamValueQueue*>(this);
+            return Steinberg::kResultOk;
+        }
+        *obj = nullptr;
+        return Steinberg::kNoInterface;
+    }
+    Steinberg::uint32 PLUGIN_API addRef() override { return 1000; }
+    Steinberg::uint32 PLUGIN_API release() override { return 1000; }
+    Steinberg::Vst::ParamID PLUGIN_API getParameterId() override { return pid; }
+    Steinberg::int32 PLUGIN_API getPointCount() override { return count; }
+    Steinberg::tresult PLUGIN_API getPoint(Steinberg::int32 index, Steinberg::int32& offset, Steinberg::Vst::ParamValue& value) override {
+        if (index < 0 || index >= count)
+            return Steinberg::kInvalidArgument;
+        offset = offsets[index];
+        value = values[index];
+        return Steinberg::kResultOk;
+    }
+    Steinberg::tresult PLUGIN_API addPoint(Steinberg::int32 offset, Steinberg::Vst::ParamValue value, Steinberg::int32& index) override {
+        if (count >= 8)
+            return Steinberg::kResultFalse;
+        index = count;
+        offsets[count] = offset;
+        values[count] = value;
+        ++count;
+        return Steinberg::kResultTrue;
+    }
+};
+
+class FixedChanges final : public Steinberg::Vst::IParameterChanges {
+public:
+    FixedParamQueue queues[32];
+    int count = 0;
+    void reset() { count = 0; }
+    Steinberg::tresult PLUGIN_API queryInterface(const Steinberg::TUID iid, void** obj) override {
+        const Steinberg::FUID id = Steinberg::FUID::fromTUID(iid);
+        if (id == Steinberg::Vst::IParameterChanges::iid || id == Steinberg::FUnknown::iid) {
+            *obj = static_cast<Steinberg::Vst::IParameterChanges*>(this);
+            return Steinberg::kResultOk;
+        }
+        *obj = nullptr;
+        return Steinberg::kNoInterface;
+    }
+    Steinberg::uint32 PLUGIN_API addRef() override { return 1000; }
+    Steinberg::uint32 PLUGIN_API release() override { return 1000; }
+    Steinberg::int32 PLUGIN_API getParameterCount() override { return count; }
+    Steinberg::Vst::IParamValueQueue* PLUGIN_API getParameterData(Steinberg::int32 index) override {
+        return index >= 0 && index < count ? &queues[index] : nullptr;
+    }
+    Steinberg::Vst::IParamValueQueue* PLUGIN_API addParameterData(const Steinberg::Vst::ParamID& id, Steinberg::int32& index) override {
+        if (count >= 32)
+            return nullptr;
+        index = count;
+        queues[count].pid = id;
+        queues[count].count = 0;
+        return &queues[count++];
+    }
+};
+
+class FixedEvents final : public Steinberg::Vst::IEventList {
+public:
+    Steinberg::Vst::Event items[64] {};
+    int count = 0;
+    void reset() { count = 0; }
+    Steinberg::tresult PLUGIN_API queryInterface(const Steinberg::TUID iid, void** obj) override {
+        const Steinberg::FUID id = Steinberg::FUID::fromTUID(iid);
+        if (id == Steinberg::Vst::IEventList::iid || id == Steinberg::FUnknown::iid) {
+            *obj = static_cast<Steinberg::Vst::IEventList*>(this);
+            return Steinberg::kResultOk;
+        }
+        *obj = nullptr;
+        return Steinberg::kNoInterface;
+    }
+    Steinberg::uint32 PLUGIN_API addRef() override { return 1000; }
+    Steinberg::uint32 PLUGIN_API release() override { return 1000; }
+    Steinberg::int32 PLUGIN_API getEventCount() override { return count; }
+    Steinberg::tresult PLUGIN_API getEvent(Steinberg::int32 index, Steinberg::Vst::Event& e) override {
+        if (index < 0 || index >= count)
+            return Steinberg::kInvalidArgument;
+        e = items[index];
+        return Steinberg::kResultOk;
+    }
+    Steinberg::tresult PLUGIN_API addEvent(Steinberg::Vst::Event& e) override {
+        if (count >= 64)
+            return Steinberg::kResultFalse;
+        items[count++] = e;
+        return Steinberg::kResultTrue;
+    }
+};
 
 class Vst3Device : public Device {
 public:
@@ -147,6 +293,12 @@ public:
     Steinberg::IPtr<Steinberg::Vst::IEditController> controller;
     std::map<std::string, Steinberg::Vst::ParamID> ids;
     Steinberg::Vst::HostProcessData processData;
+    std::vector<float> inL, inR, outL, outR;
+    std::vector<Steinberg::Vst::ParamID> paramIds;
+    std::vector<float> sent;
+    FixedChanges changes;
+    FixedEvents events;
+    bool separateController = false;
     bool prepared = false;
     double sr = 48000;
     int maxBlock = 512;
@@ -158,6 +310,15 @@ public:
             processor->setProcessing(false);
         if (component)
             component->setActive(false);
+        if (separateController && controller && component) {
+            Steinberg::FUnknownPtr<Steinberg::Vst::IConnectionPoint> from(component);
+            Steinberg::FUnknownPtr<Steinberg::Vst::IConnectionPoint> to(controller);
+            if (from && to) {
+                from->disconnect(to);
+                to->disconnect(from);
+            }
+            controller->terminate();
+        }
         if (component)
             component->terminate();
         processor.reset();
@@ -184,36 +345,78 @@ public:
         processor->setProcessing(true);
         // bufferSamples == 0: the host fills channel pointers each block.
         processData.prepare(*component, 0, kSample32);
+        inL.assign(static_cast<size_t>(maxBlock), 0.f);
+        inR.assign(static_cast<size_t>(maxBlock), 0.f);
+        outL.assign(static_cast<size_t>(maxBlock), 0.f);
+        outR.assign(static_cast<size_t>(maxBlock), 0.f);
+        sent.assign(params.size(), -1.f);
         prepared = true;
     }
 
-    void process(AudioBuffer& audio, MidiBuffer&) override {
+    void process(AudioBuffer& audio, MidiBuffer& midi) override {
         if (bypass.load() || !prepared || !processor)
             return;
         using namespace Steinberg::Vst;
-        const int frames = std::min(audio.frames, maxBlock);
-        std::vector<float> inL(frames), inR(frames), outL(frames), outR(frames);
-        if (audio.channels > 0)
-            std::copy(audio.ch(0), audio.ch(0) + frames, inL.begin());
-        if (audio.channels > 1)
-            std::copy(audio.ch(1), audio.ch(1) + frames, inR.begin());
-        else
-            inR = inL;
-        for (const auto& p : params) {
-            auto it = ids.find(p.id);
-            if (it != ids.end() && controller)
-                controller->setParamNormalized(it->second, p.value);
+        changes.reset();
+        events.reset();
+        const int nparams = std::min(static_cast<int>(params.size()), static_cast<int>(paramIds.size()));
+        for (int i = 0; i < nparams && i < static_cast<int>(sent.size()); ++i) {
+            const float v = params[static_cast<size_t>(i)].target.load(std::memory_order_relaxed);
+            if (v == sent[static_cast<size_t>(i)])
+                continue;
+            Steinberg::int32 index = 0;
+            if (auto* queue = changes.addParameterData(paramIds[static_cast<size_t>(i)], index)) {
+                Steinberg::int32 point = 0;
+                queue->addPoint(0, v, point);
+                sent[static_cast<size_t>(i)] = v;
+            }
+        }
+        for (const auto& ev : midi.events) {
+            if (events.count >= 64)
+                break;
+            Event e {};
+            e.busIndex = 0;
+            e.sampleOffset = ev.sample;
+            e.ppqPosition = 0;
+            const uint8_t kind = ev.status & 0xF0;
+            if (kind == 0x90 && ev.data2 > 0) {
+                e.type = Event::kNoteOnEvent;
+                e.noteOn.channel = ev.status & 0x0F;
+                e.noteOn.pitch = ev.data1;
+                e.noteOn.velocity = ev.data2 / 127.f;
+                e.noteOn.noteId = ev.data1;
+            } else if (kind == 0x80 || (kind == 0x90 && ev.data2 == 0)) {
+                e.type = Event::kNoteOffEvent;
+                e.noteOff.channel = ev.status & 0x0F;
+                e.noteOff.pitch = ev.data1;
+                e.noteOff.velocity = 0.f;
+                e.noteOff.noteId = ev.data1;
+            } else {
+                continue;
+            }
+            events.items[events.count++] = e;
         }
         float* ins[2] = {inL.data(), inR.data()};
         float* outs[2] = {outL.data(), outR.data()};
-        processData.setChannelBuffers(kInput, 0, ins, 2);
-        processData.setChannelBuffers(kOutput, 0, outs, 2);
-        processData.numSamples = frames;
-        processor->process(processData);
-        if (audio.channels > 0)
-            std::copy(outL.begin(), outL.end(), audio.ch(0));
-        if (audio.channels > 1)
-            std::copy(outR.begin(), outR.end(), audio.ch(1));
+        for (int done = 0; done < audio.frames; done += maxBlock) {
+            const int n = std::min(maxBlock, audio.frames - done);
+            for (int i = 0; i < n; ++i) {
+                inL[static_cast<size_t>(i)] = audio.channels > 0 ? audio.ch(0)[done + i] : 0.f;
+                inR[static_cast<size_t>(i)] = audio.channels > 1 ? audio.ch(1)[done + i] : inL[static_cast<size_t>(i)];
+            }
+            processData.setChannelBuffers(kInput, 0, ins, 2);
+            processData.setChannelBuffers(kOutput, 0, outs, 2);
+            processData.numSamples = n;
+            processData.inputParameterChanges = &changes;
+            processData.inputEvents = &events;
+            processor->process(processData);
+            for (int i = 0; i < n; ++i) {
+                if (audio.channels > 0)
+                    audio.ch(0)[done + i] = outL[static_cast<size_t>(i)];
+                if (audio.channels > 1)
+                    audio.ch(1)[done + i] = outR[static_cast<size_t>(i)];
+            }
+        }
     }
 
     int latency() const override {
@@ -315,6 +518,24 @@ std::shared_ptr<Device> PluginHost::instantiate(const std::string& pluginPath, s
             error = "no audio processor";
             return nullptr;
         }
+        if (!dev->controller) {
+            TUID cid {};
+            if (dev->component->getControllerClassId(cid) == kResultOk) {
+                dev->controller = factory.createInstance<IEditController>(cid);
+                if (dev->controller && dev->controller->initialize(&dev->host) == kResultOk) {
+                    dev->separateController = true;
+                    FUnknownPtr<IConnectionPoint> from(dev->component);
+                    FUnknownPtr<IConnectionPoint> to(dev->controller);
+                    if (from && to) {
+                        from->connect(to);
+                        to->connect(from);
+                    }
+                } else if (dev->controller) {
+                    dev->controller->terminate();
+                    dev->controller.reset();
+                }
+            }
+        }
         if (dev->controller) {
             const int32 count = dev->controller->getParameterCount();
             for (int32 i = 0; i < count; ++i) {
@@ -331,6 +552,7 @@ std::shared_ptr<Device> PluginHost::instantiate(const std::string& pluginPath, s
                 p.value = static_cast<float>(dev->controller->getParamNormalized(info.id));
                 dev->params.push_back(p);
                 dev->ids[p.id] = info.id;
+                dev->paramIds.push_back(info.id);
             }
         }
         dev->type = "vst3";

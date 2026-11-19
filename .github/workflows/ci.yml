@@ -15,7 +15,9 @@ jobs:
           sudo apt-get install -y ninja-build pkg-config libasound2-dev \
             libx11-dev libxext-dev xvfb fonts-liberation
       - name: Source gate
-        run: python3 tools/check_no_juce.py
+        run: |
+          python3 tools/check_no_juce.py
+          python3 tools/check_no_asio_sdk.py
       - name: Configure
         run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++
       - name: Build
@@ -24,11 +26,13 @@ jobs:
         run: xvfb-run -a ctest --test-dir build --output-on-failure
 
   windows:
-    runs-on: windows-latest
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
       - name: Source gate
-        run: python tools/check_no_juce.py
+        run: |
+          python tools/check_no_juce.py
+          python tools/check_no_asio_sdk.py
       - name: Configure
         run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64
       - name: Build

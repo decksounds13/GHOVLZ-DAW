@@ -1,32 +1,26 @@
 # Screenshot audit
 
-PNGs in this folder were written by `GHOVLZ DAW --screenshot` on the software canvas at 1680×980. The same paint path is what Direct2D runs on Windows. The concept boards that started the layout are not stored in the repository; the comparison below is against the GHOVLZ identity sheet and the named arrangement from the brief (track names, markers, scenes, pad names, palette).
+PNGs in this folder were written by `GHOVLZ DAW --screenshot` on the software canvas at 1680×980. The paint path is the one Direct2D runs on Windows. The concept boards are not stored in the repository. The comparison is against the brief: near-black field, warm brown-gray, antique gold and amber, Bahnschrift-style wordmark, track names, markers, scenes, and the DarkKnob filmstrip.
 
-The app was also opened under Xvfb. ALSA has no card on this machine, so the audio device stays off and the window loop still paints. That run was stopped from outside after it had been up; it did not abort on the missing device or the missing MIDI port.
+This pass measured arrangement paint at 13.7 ms cold and 12.9 ms warm (`frame-times.txt`). AddressSanitizer, UndefinedBehaviorSanitizer, and ThreadSanitizer were run on the Catch2 suite. The 10 minute showcase at 256 frames reported zero audio-thread allocations, and 10,000 graph republishes during playback were ThreadSanitizer-clean.
 
-## Frame time
+## Concept against this build
 
-Software canvas, arrangement, cache already warm from the screenshot pass: about 16.9 ms for the first 30 frames and 16.1 ms for the next 200. See `frame-times.txt` and the renderer section of [JUCE_PORTING_NOTES.md](JUCE_PORTING_NOTES.md). Direct2D was not timed here.
-
-## Views
-
-| File | What it shows | Against the concept |
+| View | Concept ask | This build |
 | --- | --- | --- |
-| `arrangement.png` | Browser, ruler with Intro / Verse / Drop / Break, loop across the arrangement, clips named Kick Loop, Drum Loop, Snare, Bass Loop, Lead, Pad Chords, Vocal, Riser, playhead at 17.1.1 (quarter 64 at 128 BPM, 4/4), Synth Lead device strip with DarkKnob filmstrips | Track names, marker names, and the gold/amber clip colors match the brief. The ruler is functional rather than a copy of a concept illustration. |
-| `session.png` | Eight tracks by scenes Intro, Verse, Build, Drop, Break, Drop 2, Outro, End, with scene launch buttons | Scene names match. Returns are not given slots in the showcase. |
-| `perform.png` | 8×6 pads. Row 0 and row 1 use the names from the brief. One row is teal `#1F6B62`, one is green `#5AA05A`, the rest stay in the warm palette | Pad names for the first two rows match the readable concept labels. Later rows are filled with kit and macro names so the grid is not blank. |
-| `mixer.png` | Kick, Drums, Snare, Bass, Synth Lead, Pads, Vocals, FX, A Reverb, B Delay, Master. Gold meters, faders, dB readouts. Kick is boosted in the screenshot pass so its meter is the hot one | Channel list matches. Meters are fed by a real `Engine::process` of the showcase, not drawn from constants. |
-| `device-chain.png` | Wavetable, Filter, and Saturator for Synth Lead, with Position / Wave / Unison / Level, Cutoff / Reso / Drive / Mix, Drive / Tone / Mix / Output, plus the EQ Eight magnitude curve | Knob set matches the brief. The curve is `eqMagnitudeDb` on the message thread (default bands, including the gentle bell and shelf). |
-| `piano-roll.png` | Synth Lead notes on a piano grid, C labels on the octave | The pitches are the showcase clip (64, 67, 71, 74, 72, 67, 69, 64 and the repeats). |
-| `browser.png` | Sounds, Drums, Instruments, Audio Effects, MIDI Effects, Samples, Plugins, with the native device list under Audio Effects | Categories match the brief. Drag and drop onto a track is not implemented; the list is the browser. |
-| `plugin.png` | Generic editor for the hosted GHOVLZ Test Gain VST3, Gain at its default normalized 0.5 | The test plugin has no `IPlugView`. The window is the host's parameter page, loaded from the bundle the build just produced. |
+| Arrangement | Headers for Kick, Drums, Snare, and Bass stay visible. Clips do not cover them. Waveforms, MIDI previews, title bars, a filter-cutoff lane, loop brace, Intro/Verse/Drop/Break, gold playhead flag at 17.1.1. | Headers sit left of the clip lane and the lane is clipped. Kick Loop, Drum Loop, Snare, Bass Loop, Lead, Pad Chords, Vocal, and Riser are drawn with waveforms or note previews. The cutoff curve is on Pads. Markers and the 17.1.1 flag are on the ruler. The right column has a mini knob, M/S/Arm, and a stereo meter. |
+| Transport | Rounded dark cluster, play, stop, record, loop, metronome, wordmark, readable renderer badge. | Play triangle, stop square, record dot, loop, and metronome are drawn glyphs. The badge reads CPU on these PNGs. |
+| Browser | Crisp "BROWSER" and a selected Sounds row. | Text is drawn after any blur, with an amber mark on Sounds. |
+| Session | Scenes Intro, Verse, Build, Drop, Break, Drop 2, Outro, End, not covered by the clip grid. | Eight clip columns stop before a 120 px scene column. Drop is the gold outline. |
+| Perform | Performance pads. | 8×3 pads. Drop is the gold pad. Pads do not launch clips yet. |
+| Mixer | Pan, sends, insert slots, M/S/Arm, routing, dB scale, peak hold, clip lamp, wider stereo meters, channel colour. | Each strip has routing, three insert slots, a pan knob, A/B sends, a fader, a dB scale, a stereo meter, and M/S/Arm. Synth Lead has the gold outline. |
+| Device chain | Framed devices, meters, titles. | Wavetable, Filter, and Saturator for Synth Lead, with titled panels, filmstrip knobs, and stereo meters. |
+| Piano roll and plugin | Notes, and a generic plugin editor. | Piano roll shows the lead clip. The plugin page is the hosted GHOVLZ Test Gain parameter. |
 
-## Gaps still visible
+## Still open in the UI
 
-- No vendor plugin editor. A plugin with `IPlugView` is not embedded yet.
-- The arrangement does not zoom, slip, or drag clips.
-- Session launch is implemented in the engine (`launchScene`) and the scene buttons are drawn; the screenshot pass does not click them.
-- Mixer meters are peak bars. There is no gain-reduction meter on the strip.
-- The performance grid does not fire clips yet. It is the layout and the names.
-- Browser items are not dragged onto tracks.
-- Linux cannot show the `D3D11` / `WARP` badge. Those strings are what `Direct2DCanvas::backendName` returns after device creation on Windows.
+- Clip drag, zoom, and slip are not implemented.
+- A plugin `IPlugView` is not embedded. The page is the host's parameter list.
+- Performance pads do not fire clips.
+- Browser rows are not dragged onto tracks.
+- These PNGs show the CPU badge. `D3D11` and `WARP` are the strings `Direct2DCanvas` returns after device creation on Windows.

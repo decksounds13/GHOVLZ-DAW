@@ -1,5 +1,9 @@
 #pragma once
 
+// Provenance: radix-2 FFT used by the linear-phase EQ and the analyzer.
+// Re-expressed from the GHOVLZ-EQ analysis code. The EQ repository does not
+// publish a license file.
+
 #include <cmath>
 #include <complex>
 #include <vector>

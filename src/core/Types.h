@@ -1,5 +1,7 @@
 #pragma once
 
+#include "core/RtGuard.h"
+
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -20,9 +22,15 @@ struct AudioBuffer {
     void resize(int ch, int n) {
         channels = std::max(0, ch);
         frames = std::max(0, n);
-        data.assign(static_cast<size_t>(channels) * static_cast<size_t>(frames), 0.f);
+        const size_t need = static_cast<size_t>(channels) * static_cast<size_t>(frames);
+        if (data.size() < need)
+            data.resize(need);
+        std::fill(data.begin(), data.begin() + static_cast<std::ptrdiff_t>(need), 0.f);
     }
-    void clear() { std::fill(data.begin(), data.end(), 0.f); }
+    void clear() {
+        const size_t need = static_cast<size_t>(channels) * static_cast<size_t>(frames);
+        std::fill(data.begin(), data.begin() + static_cast<std::ptrdiff_t>(std::min(need, data.size())), 0.f);
+    }
     float* ch(int c) { return data.data() + static_cast<size_t>(c) * static_cast<size_t>(frames); }
     const float* ch(int c) const { return data.data() + static_cast<size_t>(c) * static_cast<size_t>(frames); }
     void addFrom(const AudioBuffer& src, float gain = 1.f) {
@@ -65,7 +73,47 @@ struct Param {
     float maxV = 1.f;
     float value = 0.f;
     float skew = 1.f;
+    // Audio thread reads target and writes smoothed. The message thread writes
+    // target only. smoothed is snapped from set() when no callback is running.
+    std::atomic<float> target {0.f};
+    float smoothed = 0.f;
     std::vector<std::string> choices;
+
+    Param() = default;
+    Param(const Param& o)
+        : id(o.id), name(o.name), minV(o.minV), maxV(o.maxV), value(o.value), skew(o.skew),
+          target(o.target.load(std::memory_order_relaxed)), smoothed(o.smoothed), choices(o.choices) {}
+    Param& operator=(const Param& o) {
+        if (this != &o) {
+            id = o.id;
+            name = o.name;
+            minV = o.minV;
+            maxV = o.maxV;
+            value = o.value;
+            skew = o.skew;
+            target.store(o.target.load(std::memory_order_relaxed), std::memory_order_relaxed);
+            smoothed = o.smoothed;
+            choices = o.choices;
+        }
+        return *this;
+    }
+    Param(Param&& o) noexcept
+        : id(std::move(o.id)), name(std::move(o.name)), minV(o.minV), maxV(o.maxV), value(o.value), skew(o.skew),
+          target(o.target.load(std::memory_order_relaxed)), smoothed(o.smoothed), choices(std::move(o.choices)) {}
+    Param& operator=(Param&& o) noexcept {
+        if (this != &o) {
+            id = std::move(o.id);
+            name = std::move(o.name);
+            minV = o.minV;
+            maxV = o.maxV;
+            value = o.value;
+            skew = o.skew;
+            target.store(o.target.load(std::memory_order_relaxed), std::memory_order_relaxed);
+            smoothed = o.smoothed;
+            choices = std::move(o.choices);
+        }
+        return *this;
+    }
 
     float norm() const {
         if (!choices.empty()) {
@@ -109,27 +157,52 @@ public:
     std::atomic<bool> bypass {false};
     std::vector<Param> params;
 
-    Param* find(const std::string& pid) {
+    Param* find(const char* pid) {
+        if (!pid)
+            return nullptr;
         for (auto& p : params)
             if (p.id == pid)
                 return &p;
         return nullptr;
     }
-    const Param* find(const std::string& pid) const {
+    const Param* find(const char* pid) const {
+        if (!pid)
+            return nullptr;
         for (const auto& p : params)
             if (p.id == pid)
                 return &p;
         return nullptr;
     }
-    float get(const std::string& pid) const {
+    Param* find(const std::string& pid) { return find(pid.c_str()); }
+    const Param* find(const std::string& pid) const { return find(pid.c_str()); }
+    // Message-thread lookup. The audio callback uses at(), which does not
+    // compare names. Calling get() from the callback is a real-time hit.
+    float get(const char* pid) const {
+        if (rtGuardActive())
+            rtGuardHit("param-name");
         if (const auto* p = find(pid))
-            return p->value;
+            return p->smoothed;
         return 0.f;
     }
-    void set(const std::string& pid, float v) {
-        if (auto* p = find(pid))
-            p->value = v;
+    float get(const std::string& pid) const { return get(pid.c_str()); }
+    float at(int index) {
+        if (index < 0 || index >= static_cast<int>(params.size()))
+            return 0.f;
+        auto& p = params[static_cast<size_t>(index)];
+        const float t = p.target.load(std::memory_order_relaxed);
+        const float c = (p.smoothed == t) ? 1.f : 0.35f;
+        p.smoothed += (t - p.smoothed) * c;
+        return p.smoothed;
     }
+    void set(const char* pid, float v) {
+        if (auto* p = find(pid)) {
+            p->value = v;
+            p->target.store(v, std::memory_order_relaxed);
+            if (!rtGuardActive())
+                p->smoothed = v;
+        }
+    }
+    void set(const std::string& pid, float v) { set(pid.c_str(), v); }
 
     virtual void prepare(double sampleRate, int maxBlock) = 0;
     virtual void process(AudioBuffer& audio, MidiBuffer& midi) = 0;
