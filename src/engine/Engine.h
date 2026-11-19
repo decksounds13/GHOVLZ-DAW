@@ -102,10 +102,24 @@ private:
 
     Graph* acquire() const;
     void releaseGraph() const;
+    bool graphPinned(Graph* graph) const;
 
     std::shared_ptr<Project> project_;
     mutable std::atomic<Graph*> published_ {nullptr};
     mutable std::atomic<int> readers_ {0};
+    // Hazard slots. A reader stores the graph it is using here before touching it.
+    // publish() will not destroy a graph while any slot still names it.
+    struct Hazard {
+        std::atomic<Graph*> ptr {nullptr};
+    };
+    mutable Hazard hazards_[8];
+    static Graph* const kClaimed;
+    struct PinState {
+        Hazard* slot = nullptr;
+        Graph* held = nullptr;
+        int depth = 0;
+    };
+    static PinState& pinState();
     std::vector<std::unique_ptr<Graph>> owned_;
     std::shared_ptr<PluginHost> plugins_;
     double sampleRate_ = 48000;

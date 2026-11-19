@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstring>
 
 #if defined(__SSE__)
@@ -66,7 +67,8 @@ struct AutoApply {
     int paramIndex = -1;
     int kind = 0;
     bool steps = false;
-    std::vector<AutoPoint> points;
+    int count = 0;
+    AutoPoint samples[16] {};
 };
 
 struct EngineGraph {
@@ -82,6 +84,7 @@ struct EngineGraph {
     std::vector<AutoApply> autos;
     std::map<std::string, MediaPtr> media;
     std::vector<std::unique_ptr<Node>> nodes;
+    std::atomic<int> ready {0};
 
     Node* find(const std::string& id) {
         for (auto& n : nodes)
@@ -165,19 +168,21 @@ void delayWriteAdd(Engine::DelayLineState& line, const AudioBuffer& src, AudioBu
     }
 }
 
-float evalPoints(const std::vector<AutoPoint>& points, double q, bool steps = false) {
-    if (points.empty())
+float evalPoints(const AutoApply& apply, double q) {
+    if (apply.count <= 0)
         return 0.f;
-    if (steps) {
-        float v = points.front().value;
-        for (const auto& p : points)
-            if (q + 1.0e-12 >= p.quarter)
-                v = p.value;
+    const AutoPoint* points = apply.samples;
+    const int n = apply.count;
+    if (apply.steps) {
+        float v = points[0].value;
+        for (int i = 0; i < n; ++i)
+            if (q + 1.0e-12 >= points[i].quarter)
+                v = points[i].value;
         return v;
     }
-    if (q <= points.front().quarter)
-        return points.front().value;
-    for (size_t i = 1; i < points.size(); ++i) {
+    if (q <= points[0].quarter)
+        return points[0].value;
+    for (int i = 1; i < n; ++i) {
         if (q <= points[i].quarter) {
             const auto& a = points[i - 1];
             const auto& b = points[i];
@@ -186,7 +191,13 @@ float evalPoints(const std::vector<AutoPoint>& points, double q, bool steps = fa
             return a.value + (b.value - a.value) * t;
         }
     }
-    return points.back().value;
+    return points[n - 1].value;
+}
+
+void copyPoints(AutoApply& apply, const std::vector<AutoPoint>& points) {
+    apply.count = std::min(16, static_cast<int>(points.size()));
+    for (int i = 0; i < apply.count; ++i)
+        apply.samples[i] = points[static_cast<size_t>(i)];
 }
 
 void panGains(float pan, float& l, float& r) {
@@ -212,14 +223,74 @@ Engine::~Engine() {
     published_.store(nullptr, std::memory_order_seq_cst);
     while (readers_.load(std::memory_order_seq_cst) != 0) {
     }
+    while (graphPinned(nullptr)) {
+    }
     owned_.clear();
 }
 
-Engine::Graph* Engine::acquire() const {
-    readers_.fetch_add(1, std::memory_order_seq_cst);
-    return published_.load(std::memory_order_seq_cst);
+Engine::Graph* const Engine::kClaimed = reinterpret_cast<Engine::Graph*>(static_cast<std::uintptr_t>(1));
+
+Engine::PinState& Engine::pinState() {
+    thread_local PinState pin;
+    return pin;
 }
-void Engine::releaseGraph() const { readers_.fetch_sub(1, std::memory_order_seq_cst); }
+
+bool Engine::graphPinned(Graph* graph) const {
+    for (const auto& hazard : hazards_) {
+        Graph* held = hazard.ptr.load(std::memory_order_seq_cst);
+        if (held == nullptr)
+            continue;
+        if (graph == nullptr || held == graph || held == kClaimed)
+            return true;
+    }
+    return false;
+}
+
+Engine::Graph* Engine::acquire() const {
+    PinState& pin = pinState();
+    if (pin.depth > 0) {
+        ++pin.depth;
+        return pin.held;
+    }
+    Hazard* slot = nullptr;
+    for (;;) {
+        for (auto& hazard : hazards_) {
+            Graph* empty = nullptr;
+            if (hazard.ptr.compare_exchange_strong(empty, kClaimed, std::memory_order_seq_cst)) {
+                slot = &hazard;
+                break;
+            }
+        }
+        if (slot)
+            break;
+    }
+    Graph* graph = nullptr;
+    do {
+        graph = published_.load(std::memory_order_seq_cst);
+        slot->ptr.store(graph, std::memory_order_seq_cst);
+    } while (published_.load(std::memory_order_seq_cst) != graph);
+    if (!graph) {
+        slot->ptr.store(nullptr, std::memory_order_seq_cst);
+        return nullptr;
+    }
+    pin.slot = slot;
+    pin.held = graph;
+    pin.depth = 1;
+    readers_.fetch_add(1, std::memory_order_seq_cst);
+    return graph;
+}
+
+void Engine::releaseGraph() const {
+    PinState& pin = pinState();
+    if (pin.depth <= 0)
+        return;
+    if (--pin.depth > 0)
+        return;
+    pin.slot->ptr.store(nullptr, std::memory_order_seq_cst);
+    pin.slot = nullptr;
+    pin.held = nullptr;
+    readers_.fetch_sub(1, std::memory_order_seq_cst);
+}
 
 void Engine::setPluginHost(std::shared_ptr<PluginHost> host) { plugins_ = std::move(host); }
 
@@ -264,11 +335,10 @@ std::shared_ptr<Device> Engine::makeLive(const DeviceState& state) {
 
 void Engine::publish() {
     if (!project_) {
-        Graph* old = published_.exchange(nullptr, std::memory_order_seq_cst);
-        while (readers_.load(std::memory_order_seq_cst) != 0) {
+        published_.exchange(nullptr, std::memory_order_seq_cst);
+        while (readers_.load(std::memory_order_seq_cst) != 0 || graphPinned(nullptr)) {
         }
-        if (old)
-            owned_.clear();
+        owned_.clear();
         return;
     }
     Graph* previous = published_.load(std::memory_order_acquire);
@@ -379,7 +449,7 @@ void Engine::publish() {
         const auto what = rest.substr(colon + 1);
         AutoApply apply;
         apply.node = g->find(tid);
-        apply.points = lane.points;
+        copyPoints(apply, lane.points);
         apply.steps = lane.steps;
         if (!apply.node)
             continue;
@@ -403,7 +473,7 @@ void Engine::publish() {
         AutoApply apply;
         apply.kind = 2;
         apply.steps = lane.steps;
-        apply.points = lane.points;
+        copyPoints(apply, lane.points);
         for (auto& n : g->nodes) {
             for (auto& d : n->devices) {
                 if (d->id != did)
@@ -417,12 +487,13 @@ void Engine::publish() {
         if (apply.device && apply.paramIndex >= 0)
             g->autos.push_back(std::move(apply));
     }
+    g->ready.store(1, std::memory_order_release);
     Graph* raw = g.get();
     owned_.push_back(std::move(g));
     Graph* old = published_.exchange(raw, std::memory_order_seq_cst);
-    while (readers_.load(std::memory_order_seq_cst) != 0) {
-    }
     if (old) {
+        while (graphPinned(old)) {
+        }
         owned_.erase(std::remove_if(owned_.begin(), owned_.end(), [&](const std::unique_ptr<Graph>& p) { return p.get() == old; }),
                      owned_.end());
     }
@@ -476,6 +547,8 @@ void Engine::process(float* interleavedOut, const float* interleavedIn, int fram
     const auto blockStart = std::chrono::steady_clock::now();
     RtScope audioThread;
     Graph* g = acquire();
+    if (g)
+        g->ready.load(std::memory_order_acquire);
     if (!g || frames <= 0) {
         releaseGraph();
         if (interleavedOut && frames > 0)
@@ -649,7 +722,8 @@ void Engine::process(float* interleavedOut, const float* interleavedIn, int fram
                             here = true;
                     if (!here)
                         continue;
-                    for (const auto& pt : apply.points) {
+                    for (int pi = 0; pi < apply.count; ++pi) {
+                        const auto& pt = apply.samples[pi];
                         const int s = static_cast<int>(std::llround((pt.quarter - q) * spq));
                         if (s > 0 && s < audio.frames && nc < 63)
                             cuts[nc++] = s;
@@ -683,7 +757,7 @@ void Engine::process(float* interleavedOut, const float* interleavedIn, int fram
                             if (d.get() != apply.device.get())
                                 continue;
                             auto& param = d->params[static_cast<size_t>(apply.paramIndex)];
-                            param.target.store(evalPoints(apply.points, qq, apply.steps), std::memory_order_relaxed);
+                            param.target.store(evalPoints(apply, qq), std::memory_order_relaxed);
                             param.snapSeq.fetch_add(1, std::memory_order_release);
                         }
                     }
@@ -725,7 +799,7 @@ void Engine::process(float* interleavedOut, const float* interleavedIn, int fram
             for (const auto& apply : g->autos) {
                 if (apply.node != n || apply.kind > 1)
                     continue;
-                const float v = evalPoints(apply.points, qq, apply.steps);
+                const float v = evalPoints(apply, qq);
                 if (apply.kind == 0)
                     volDb = v;
                 else

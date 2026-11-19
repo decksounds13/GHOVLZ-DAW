@@ -51,6 +51,10 @@ static fs::path findUp(const std::string& name) {
                  it != fs::recursive_directory_iterator(); ++it) {
                 if (it->path().filename() == name)
                     return it->path();
+#if defined(_WIN32)
+                if (it->path().filename() == name + ".exe")
+                    return it->path();
+#endif
                 if (it.depth() > 3)
                     it.disable_recursion_pending();
             }
