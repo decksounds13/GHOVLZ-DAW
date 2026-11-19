@@ -9,6 +9,7 @@
 #include "model/Undo.h"
 #include "ui/Canvas.h"
 #include "ui/Paint.h"
+#include "ui/Renderer.h"
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -584,3 +585,28 @@ TEST_CASE("test synth notes land once and state reaches the controller") {
     REQUIRE(restored != nullptr);
     REQUIRE(restored->params[0].value == Catch::Approx(0.2f).margin(0.001));
 }
+
+#if defined(_WIN32)
+TEST_CASE("UI-20 WARP readback matches a painted fill") {
+    RendererDesc desc;
+    desc.width = 32;
+    desc.height = 16;
+    desc.preference = RendererPreference::Warp;
+    auto canvas = openRenderer(desc);
+    REQUIRE(canvas);
+    REQUIRE(std::string(canvas->backendName()) == "WARP");
+    canvas->begin();
+    canvas->clear(Color::argb(0xFFB49637));
+    canvas->end();
+    const auto path = std::filesystem::temp_directory_path() / "ghovlz-warp-readback.png";
+    REQUIRE(canvas->savePng(path.string()));
+    const Image image = loadImageRgba(path.string());
+    std::filesystem::remove(path);
+    REQUIRE(image.w == 32);
+    REQUIRE(image.h == 16);
+    REQUIRE(image.rgba.size() >= 4);
+    REQUIRE(image.rgba[0] > 150);
+    REQUIRE(image.rgba[1] > 120);
+    REQUIRE(image.rgba[2] < 90);
+}
+#endif

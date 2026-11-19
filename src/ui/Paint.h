@@ -53,7 +53,7 @@ void paintMeterCard(Canvas& canvas, const Theme& theme, float peakL, float peakR
 enum class Hit { None, Arr, Ses, Perf, Mix, Play, Stop, Rec, Loop, Metro, Badge };
 
 Rect hitRect(Hit hit, float scale = 1.f);
-Hit hitTest(float x, float y, int width, int height, float scale = 1.f);
+Hit hitTest(float x, float y, int width, int height, float scale = 1.f, View view = View::Arrangement);
 View viewFromHit(Hit hit, View current);
 
 } // namespace ghovlz

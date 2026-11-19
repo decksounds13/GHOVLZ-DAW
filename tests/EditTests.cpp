@@ -294,7 +294,7 @@ TEST_CASE("HOST-07 the gain view is a native child and resizes") {
     cls.hInstance = GetModuleHandleW(nullptr);
     cls.lpszClassName = L"GhovlzHostParent";
     RegisterClassW(&cls);
-    HWND parent = CreateWindowExW(0, L"GhovlzHostParent", L"host", WS_OVERLAPPEDWINDOW | WS_VISIBLE, 0, 0, 640, 420,
+    HWND parent = CreateWindowExW(0, L"GhovlzHostParent", L"host", WS_OVERLAPPEDWINDOW | WS_VISIBLE, 40, 40, 1280, 860,
                                   nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
     REQUIRE(parent != nullptr);
     void* parentPtr = parent;
@@ -322,6 +322,16 @@ TEST_CASE("HOST-07 the gain view is a native child and resizes") {
     REQUIRE(GetClientRect(child, &rc));
     REQUIRE(rc.right - rc.left == 520);
     REQUIRE(rc.bottom - rc.top == 280);
+    UpdateWindow(child);
+    HDC hdc = GetDC(child);
+    REQUIRE(hdc != nullptr);
+    const COLORREF bar = GetPixel(hdc, 8, 2);
+    const COLORREF disc = GetPixel(hdc, 260, 140);
+    ReleaseDC(child, hdc);
+    REQUIRE(GetRValue(bar) > 150);
+    REQUIRE(GetGValue(bar) > 120);
+    REQUIRE(GetRValue(disc) > 150);
+    REQUIRE(GetGValue(disc) > 120);
     int scaledW = 0;
     int scaledH = 0;
     REQUIRE(host.setEditorScale(*device, 2.f, scaledW, scaledH, error));

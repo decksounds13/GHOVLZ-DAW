@@ -99,7 +99,7 @@ int runWindow(AppHost& host) {
                     continue;
                 if (ev.type != ButtonPress)
                     continue;
-                const Hit hit = hitTest(pointer.x, pointer.y, w, h);
+                const Hit hit = hitTest(pointer.x, pointer.y, w, h, 1.f, host.frame.view);
                 if (hit == Hit::Play) {
                     if (host.engine->playing())
                         host.engine->stop();

@@ -4,6 +4,7 @@
 #include "midi/MidiIO.h"
 #include "ui/Canvas.h"
 #include "ui/Direct2DCanvas.h"
+#include "ui/Renderer.h"
 
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -39,7 +40,9 @@ void paint(WinState& state) {
     state.host->frame.backend = state.canvas->backendName();
     state.host->frame.audioBackend = state.audio.backendName();
     state.host->frame.midiPort = state.midi.portName();
+    state.canvas->begin();
     paintFrame(*state.canvas, state.host->frame);
+    state.canvas->end();
     if (!state.direct2d) {
         const uint8_t* rgba = softwarePixels(*state.canvas);
         if (!rgba)
@@ -88,7 +91,7 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 }
                 if (msg != WM_LBUTTONDOWN)
                     return 0;
-                const Hit hit = hitTest(pointer.x, pointer.y, state->width, state->height);
+                const Hit hit = hitTest(pointer.x, pointer.y, state->width, state->height, 1.f, state->host->frame.view);
                 if (hit == Hit::Play) {
                     if (state->host->engine->playing())
                         state->host->engine->stop();
@@ -188,8 +191,13 @@ int runWindow(AppHost& host) {
     SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(&state));
     ShowWindow(hwnd, SW_SHOW);
 
-    state.canvas = makeDirect2DCanvas(hwnd, state.width, state.height);
-    state.direct2d = static_cast<bool>(state.canvas);
+    RendererDesc desc;
+    desc.window = hwnd;
+    desc.width = state.width;
+    desc.height = state.height;
+    desc.preference = RendererPreference::Auto;
+    state.canvas = openRenderer(desc);
+    state.direct2d = state.canvas && std::string(state.canvas->backendName()) != "CPU";
     if (!state.canvas)
         state.canvas = makeSoftwareCanvas(state.width, state.height);
     if (state.audio.open(host.engine, 48000))

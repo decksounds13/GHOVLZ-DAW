@@ -163,8 +163,12 @@ if(GHOVLZ_RT_ABORT)
     add_compile_definitions(GHOVLZ_RT_ABORT)
 endif()
 
-add_executable(GhovlzTests tests/Tests.cpp tests/ThemeTests.cpp tests/Pass3Tests.cpp tests/EditTests.cpp src/ui/Paint.cpp src/ui/Widgets.cpp src/ui/SoftwareCanvas.cpp)
+add_executable(GhovlzTests tests/Tests.cpp tests/ThemeTests.cpp tests/Pass3Tests.cpp tests/EditTests.cpp src/ui/Paint.cpp src/ui/Widgets.cpp src/ui/SoftwareCanvas.cpp src/ui/Renderer.cpp)
 target_link_libraries(GhovlzTests PRIVATE ghovlz_core Catch2::Catch2WithMain)
+if(WIN32)
+    target_sources(GhovlzTests PRIVATE src/ui/Direct2DCanvas.cpp)
+    target_link_libraries(GhovlzTests PRIVATE d3d11 dxgi d2d1 dwrite windowscodecs ole32 uuid)
+endif()
 if(UNIX AND NOT APPLE)
     target_link_libraries(GhovlzTests PRIVATE X11)
 endif()
@@ -189,7 +193,8 @@ add_executable(GhovlzDAW
     src/midi/MidiIO.cpp
     src/ui/SoftwareCanvas.cpp
     src/ui/Paint.cpp
-    src/ui/Widgets.cpp)
+    src/ui/Widgets.cpp
+    src/ui/Renderer.cpp)
 if(WIN32)
     target_sources(GhovlzDAW PRIVATE src/ui/Direct2DCanvas.cpp src/app/PlatformWin.cpp)
     target_link_libraries(GhovlzDAW PRIVATE d3d11 dxgi d2d1 dwrite windowscodecs ole32 uuid avrt)

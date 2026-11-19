@@ -1,6 +1,6 @@
 # Screenshot audit
 
-PNGs in this folder were written by `GHOVLZ DAW --screenshot` on the software canvas at 1680×980. The paint path is the one Direct2D runs on Windows. The concept boards are not stored in the repository. The comparison is against the brief: near-black field, warm brown-gray, antique gold and amber, Bahnschrift-style wordmark, track names, markers, scenes, and the DarkKnob filmstrip.
+PNGs in this folder were written by `GHOVLZ DAW --screenshot` at 1680×980. Linux writes the software canvas. Windows writes the Direct2D target through `openRenderer` and reads the pixels back; `--force-warp` is the CI path. The paint calls are the same on both. The concept boards are not stored in the repository. The comparison is against the brief: near-black field, warm brown-gray, antique gold and amber, Bahnschrift-style wordmark, track names, markers, scenes, and the DarkKnob filmstrip.
 
 This pass measured arrangement paint at 13.7 ms cold and 12.9 ms warm (`frame-times.txt`). AddressSanitizer, UndefinedBehaviorSanitizer, and ThreadSanitizer were run on the Catch2 suite. The 10 minute showcase at 256 frames reported zero audio-thread allocations, and 10,000 graph republishes during playback were ThreadSanitizer-clean.
 

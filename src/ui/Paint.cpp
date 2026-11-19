@@ -294,14 +294,25 @@ void topBar(Canvas& c, const Frame& f) {
     c.drawText("G", 17.f, 16.f, 16.f, Color::argb(0xFF1A120C), true);
     c.drawText("GHOVLZ! DAW", 38.f, 12.f, 22.f, ink(), true);
 
-    const char* views[] = {"ARR", "SES", "PERF", "MIX"};
-    const View shown[] = {View::Arrangement, View::Session, View::Perform, View::Mixer};
-    for (int i = 0; i < 4; ++i) {
-        Rect r{kViewsX + i * (kViewW + kViewGap), 12.f, kViewW, 30.f};
-        const bool on = f.view == shown[i];
-        c.fillRoundRect(r, 6.f, on ? Color::argb(0xFF3A2E1C) : Color::argb(0xFF161311));
-        c.strokeRect(r, on ? gold() : line(), 1.f);
-        c.drawText(views[i], r.x + 8.f, r.y + 4.f, 18.f, on ? rod() : dim(), true);
+    if (f.view == View::Piano) {
+        const char* tools[] = {"Draw", "Select", "Grid", "Scale"};
+        for (int i = 0; i < 4; ++i) {
+            Rect r{kViewsX + i * 78.f, 12.f, 72.f, 30.f};
+            const bool on = i == 0;
+            c.fillRoundRect(r, 6.f, on ? Color::argb(0xFF3A2E1C) : Color::argb(0xFF161311));
+            c.strokeRect(r, on ? gold() : line(), 1.f);
+            c.drawText(tools[i], r.x + 8.f, r.y + 4.f, 18.f, on ? rod() : dim(), true);
+        }
+    } else {
+        const char* views[] = {"ARR", "SES", "PERF", "MIX"};
+        const View shown[] = {View::Arrangement, View::Session, View::Perform, View::Mixer};
+        for (int i = 0; i < 4; ++i) {
+            Rect r{kViewsX + i * (kViewW + kViewGap), 12.f, kViewW, 30.f};
+            const bool on = f.view == shown[i];
+            c.fillRoundRect(r, 6.f, on ? Color::argb(0xFF3A2E1C) : Color::argb(0xFF161311));
+            c.strokeRect(r, on ? gold() : line(), 1.f);
+            c.drawText(views[i], r.x + 8.f, r.y + 4.f, 18.f, on ? rod() : dim(), true);
+        }
     }
 
     const bool playing = f.engine && f.engine->playing();
@@ -937,18 +948,23 @@ void deviceChain(Canvas& c, const Frame& f) {
     if (!chain)
         return;
     const float sideW = 200.f;
-    c.fillRect({box.x + box.w - sideW - 8.f, box.y + 12.f, 1.f, box.h - 24.f}, line());
     const float gap = 28.f;
-    const float top = box.y + 42.f;
+    // Cards keep the concept's ratio: the display is about 38% of the card,
+    // and a 48 px knob with its 18 px caption sits in the middle of the rest.
     const float cardH = box.h - 56.f;
+    const float top = box.y + 42.f;
+    c.fillRect({box.x + box.w - sideW - 8.f, top, 1.f, cardH}, line());
     const int n = static_cast<int>(chain->devices.size());
     const float cardsW = box.w - sideW - 36.f;
     const float cardW = n > 0 ? (cardsW - gap * static_cast<float>(std::max(0, n - 1))) / static_cast<float>(n) : 200.f;
     const float knobD = 48.f;
-    const float dispTop = 36.f;
-    const float knobArea = knobD + 56.f;
-    const float dispH = std::max(120.f, cardH - dispTop - knobArea - 12.f);
-    const float joinY = top + dispTop + dispH * 0.5f;
+    const float titleH = 36.f;
+    const float dispH = cardH * 0.38f;
+    const float labelBlock = 44.f;
+    const float wellTop = titleH + dispH;
+    const float wellH = cardH - wellTop - 8.f;
+    const float knobCy = wellTop + (wellH - (knobD + labelBlock)) * 0.5f + knobD * 0.5f;
+    const float joinY = top + titleH + dispH * 0.5f;
     for (int i = 0; i < n; ++i) {
         const auto& d = chain->devices[static_cast<size_t>(i)];
         Rect r{box.x + 14.f + static_cast<float>(i) * (cardW + gap), top, cardW, cardH};
@@ -958,8 +974,10 @@ void deviceChain(Canvas& c, const Frame& f) {
         centered(c, d.name, r.x + r.w * 0.5f, r.y + 10.f, 18.f, ink(), true);
         const bool graph = d.type == "eq";
         const bool knobsOnly = d.type == "saturator" || d.type == "compressor" || d.type == "dyn";
-        if (!knobsOnly)
-            drawChainDisplay(c, {r.x + 12.f, r.y + dispTop, r.w - 24.f, graph ? cardH - 48.f : dispH}, d.type);
+        if (!knobsOnly) {
+            const float eqH = std::min(cardH - titleH - 12.f, knobCy + knobD * 0.5f + labelBlock - titleH);
+            drawChainDisplay(c, {r.x + 12.f, r.y + titleH, r.w - 24.f, graph ? eqH : dispH}, d.type);
+        }
         if (!graph) {
             std::vector<std::pair<std::string, float>> knobs;
             const int limit = knobsOnly ? 4 : 2;
@@ -970,16 +988,14 @@ void deviceChain(Canvas& c, const Frame& f) {
             }
             const int count = static_cast<int>(knobs.size());
             const int cols = count <= 1 ? 1 : 2;
-            const int rows = std::max(1, (count + cols - 1) / cols);
+            const float rowPitch = knobD + 42.f;
             for (int k = 0; k < count; ++k) {
                 const int col = k % cols;
                 const int row = k / cols;
-                const float cxk = r.x + (cols == 1 ? r.w * 0.5f : (col == 0 ? r.w * 0.28f : r.w * 0.72f));
-                float cyk = r.y + dispTop + dispH + 8.f + knobD * 0.5f;
-                if (knobsOnly) {
-                    const float span = std::max(knobD, cardH - 72.f);
-                    cyk = r.y + 56.f + (static_cast<float>(row) + 0.5f) * (span / static_cast<float>(rows));
-                }
+                const float cxk = r.x + (cols == 1 ? r.w * 0.5f : (col == 0 ? r.w * 0.32f : r.w * 0.68f));
+                float cyk = r.y + knobCy;
+                if (knobsOnly)
+                    cyk = r.y + knobCy - rowPitch * 0.5f + static_cast<float>(row) * rowPitch;
                 const float norm = knobNorm(knobs[static_cast<size_t>(k)].second);
                 darkKnob(c, cxk, cyk, knobD, norm, shortParam(knobs[static_cast<size_t>(k)].first),
                          paramText(knobs[static_cast<size_t>(k)].second));
@@ -996,10 +1012,10 @@ void deviceChain(Canvas& c, const Frame& f) {
         if (i + 1 < n) {
             const float nextX = r.x + cardW + gap;
             if (nextX + cardW <= box.x + box.w - sideW - 12.f)
-                goldJoin(c, r.x + r.w, nextX, joinY);
+                goldJoin(c, r.x + r.w, nextX, knobsOnly ? top + knobCy : joinY);
         }
     }
-    Rect mod{box.x + box.w - sideW, box.y + 8.f, sideW - 8.f, box.h - 16.f};
+    Rect mod{box.x + box.w - sideW, top, sideW - 8.f, cardH};
     c.drawText("LFO", mod.x + 12.f, mod.y + 8.f, 18.f, ink(), true);
     const float body = std::max(64.f, (mod.h - 150.f) / 3.f);
     c.drawText("Envelope", mod.x + 12.f, mod.y + 36.f, 18.f, dim(), false);
@@ -1015,16 +1031,9 @@ void deviceChain(Canvas& c, const Frame& f) {
 void piano(Canvas& c, const Frame& f) {
     const float w = static_cast<float>(c.width());
     const float h = static_cast<float>(c.height());
-    const float keyW = 72.f;
-    const float velH = 72.f;
-    const float top = kBarH + 56.f;
-    const char* tools[] = {"Draw", "Select", "Grid", "Scale"};
-    for (int i = 0; i < 4; ++i) {
-        Rect r{16.f + i * 88.f, kBarH + 8.f, 80.f, 28.f};
-        c.fillRoundRect(r, 4.f, i == 0 ? Color::argb(0xFF3A2E1C) : Color::argb(0xFF161311));
-        c.strokeRect(r, i == 0 ? gold() : line(), 1.f);
-        c.drawText(tools[i], r.x + 8.f, r.y + 4.f, 18.f, i == 0 ? rod() : ink(), true);
-    }
+    const float keyW = 84.f;
+    const float velH = 88.f;
+    const float top = kBarH + 28.f;
     const Clip* clip = nullptr;
     if (f.project) {
         for (const auto& t : f.project->tracks) {
@@ -1056,7 +1065,7 @@ void piano(Canvas& c, const Frame& f) {
     const int bars = std::max(1, static_cast<int>(spanQ / 4.0));
     for (int bar = 0; bar <= bars; ++bar) {
         const float x = xAt(origin + bar * 4.0);
-        c.drawText(std::to_string(bar + 1), x + 4.f, kBarH + 36.f, 18.f, dim(), false);
+        c.drawText(std::to_string(bar + 1), x + 4.f, kBarH + 4.f, 18.f, dim(), false);
         c.line(x, top, x, h - velH, line(), bar % 4 == 0 ? 1.4f : 1.f);
     }
     const double head = f.engine ? f.engine->playhead() : (f.project ? f.project->playhead : origin);
@@ -1066,8 +1075,11 @@ void piano(Canvas& c, const Frame& f) {
         const float y = top + p * rowH;
         const int pc = ((pitch % 12) + 12) % 12;
         const bool black = pc == 1 || pc == 3 || pc == 6 || pc == 8 || pc == 10;
-        c.fillRect({0, y, keyW, rowH - 1.f}, black ? Color::argb(0xFF1A1614) : Color::argb(0xFFD1BCAC));
+        c.fillRect({0, y, keyW, rowH - 1.f}, Color::argb(0xFFE7D7C8));
         c.fillRect({keyW, y, w - keyW, rowH - 1.f}, black ? Color::argb(0xFF100E0C) : Color::argb(0xFF161311));
+        if (black)
+            c.fillRect({0, y, keyW * 0.62f, rowH - 1.f}, Color::argb(0xFF1A1614));
+        c.fillRect({0, y + rowH - 1.f, keyW, 1.f}, Color::argb(0xFF3C3732));
         if (rowH >= 22.f || pc == 0) {
             char label[16];
             std::snprintf(label, sizeof(label), "%s%d", names[pc], pitch / 12 - 1);
@@ -1102,59 +1114,69 @@ void piano(Canvas& c, const Frame& f) {
 void browser(Canvas& c, const Frame& f) {
     const float w = static_cast<float>(c.width());
     const float h = static_cast<float>(c.height());
-    browserColumn(c, f, h);
-    Rect search{176.f, kBarH + 10.f, 420.f, 32.f};
+    Rect rail{12.f, kBarH + 12.f, 250.f, h - kBarH - 24.f};
+    panelBox(c, rail, 10.f);
+    Rect search{rail.x + 12.f, rail.y + 12.f, rail.w - 24.f, 32.f};
     c.fillRoundRect(search, 6.f, Color::argb(0xFF161311));
-    c.innerShadow(search, 4.f, Color{0, 0, 0, 120});
     c.strokeRect(search, line(), 1.f);
     glyphIcon(c, 5, search.x + 8.f, search.y + 6.f, dim());
-    c.drawText(f.search.empty() ? "Search" : f.search, search.x + 32.f, search.y + 6.f, 18.f,
-               f.search.empty() ? dim() : ink(), false);
-    c.drawText("Name", 180.f, kBarH + 52.f, 18.f, dim(), true);
-    c.drawText("Tags", 520.f, kBarH + 52.f, 18.f, dim(), true);
-    c.drawText("Duration", 760.f, kBarH + 52.f, 18.f, dim(), true);
-    const char* items[] = {"Warm Pad", "Analog Bass", "Dusty Kick", "Room Snare", "Tape Lead", "Vinyl Hat"};
-    const char* tags[] = {"Pad", "Bass", "Drum", "Drum", "Lead", "Hat"};
-    const char* durs[] = {"0:08", "0:04", "0:01", "0:01", "0:06", "0:01"};
-    for (int i = 0; i < 6; ++i) {
-        Rect r{176.f, kBarH + 80.f + i * 52.f, w - 520.f, 44.f};
-        c.fillRoundRect(r, 6.f, Color::argb(0xFF161311));
-        c.fillRect({r.x, r.y, 6.f, r.h}, i == 0 ? amber() : gold());
-        c.drawText(items[i], r.x + 16.f, r.y + 10.f, 18.f, ink(), false);
-        c.fillRoundRect({520.f, r.y + 8.f, 64.f, 26.f}, 8.f, Color::argb(0xFF2A2118));
-        c.drawText(tags[i], 528.f, r.y + 10.f, 18.f, rod(), true);
-        c.drawText(durs[i], 760.f, r.y + 10.f, 18.f, dim(), false);
-        glyphIcon(c, 6, r.x + r.w - 36.f, r.y + 12.f, i < 2 ? gold() : Color::argb(0xFF3C3732));
+    c.drawText(f.search.empty() ? "Search" : f.search, search.x + 32.f, search.y + 6.f, 18.f, f.search.empty() ? dim() : ink(), false);
+    const char* cats[] = {"Sounds", "Kick", "Bass", "Lead", "Pads", "Instruments", "Audio Effects", "Samples", "Plugins", "Favorites"};
+    for (int i = 0; i < 10; ++i) {
+        const bool child = i >= 1 && i <= 4;
+        const bool on = i == 0;
+        Rect row{rail.x + 8.f, rail.y + 56.f + i * 32.f, rail.w - 16.f, 28.f};
+        if (on)
+            c.fillRoundRect(row, 4.f, Color::argb(0xFF2A2118));
+        c.drawText(child ? ">" : (i == 0 ? "v" : ">"), row.x + (child ? 18.f : 6.f), row.y + 4.f, 18.f, dim(), false);
+        if (!child)
+            glyphIcon(c, std::min(i, 6), row.x + 22.f, row.y + 4.f, on ? amber() : Color::argb(0xFFD1BCAC));
+        c.drawText(cats[i], row.x + (child ? 36.f : 46.f), row.y + 4.f, 18.f, on ? ink() : dim(), on);
     }
-    Rect preview{w - 320.f, kBarH + 80.f, 300.f, 220.f};
-    panelBox(c, preview, 8.f);
-    c.drawText("Warm Pad", preview.x + 16.f, preview.y + 12.f, 18.f, ink(), true);
-    for (int i = 0; i < 48; ++i) {
-        const float amp = 8.f + 28.f * std::fabs(std::sin(i * 0.45f));
-        c.fillRect({preview.x + 16.f + i * 5.5f, preview.y + 90.f - amp, 3.f, amp * 2.f}, amber());
-    }
-    c.fillRoundRect({preview.x + 16.f, preview.y + 150.f, 36.f, 28.f}, 4.f, Color::argb(0xFF1A1614));
-    playGlyph(c, preview.x + 28.f, preview.y + 156.f, 16.f, rod());
-    c.drawText("Recent", preview.x, preview.y + 240.f, 18.f, dim(), true);
-    for (int i = 0; i < 3; ++i) {
-        Rect tile{preview.x + i * 100.f, preview.y + 268.f, 92.f, 64.f};
-        c.fillRoundRect(tile, 6.f, Color::argb(0xFF161311));
-        c.innerShadow(tile, 4.f, Color{0, 0, 0, 100});
-        c.drawText(items[i], tile.x + 8.f, tile.y + 20.f, 18.f, ink(), false);
-    }
-    c.drawText("Collections", 180.f, kBarH + 410.f, 18.f, dim(), true);
-    const char* cols[] = {"Drums", "Bass", "Leads", "Vocals", "FX", "House"};
-    for (int i = 0; i < 6; ++i) {
-        Rect tile{176.f + (i % 6) * 150.f, kBarH + 444.f, 140.f, 120.f};
-        c.dropShadow(tile, 6.f, 6.f, Color{0, 0, 0, 120});
-        c.fillRoundRect(tile, 8.f, Color::argb(0xFF161311));
-        c.innerShadow(tile, 8.f, Color{0, 0, 0, 110});
-        c.fillRect({tile.x, tile.y, tile.w, 6.f}, i % 2 ? amber() : gold());
-        for (int k = 0; k < 16; ++k) {
-            const float amp = 8.f + 18.f * std::fabs(std::sin((k + i) * 0.7f));
-            c.fillRect({tile.x + 12.f + k * 7.f, tile.y + 58.f - amp, 4.f, amp * 2.f}, amber());
+
+    Rect list{rail.x + rail.w + 16.f, rail.y, w - rail.w - 340.f, 430.f};
+    panelBox(c, list, 10.f);
+    c.drawText("Name", list.x + 16.f, list.y + 12.f, 18.f, dim(), true);
+    c.drawText("Tags", list.x + 280.f, list.y + 12.f, 18.f, dim(), true);
+    c.drawText("Duration", list.x + 520.f, list.y + 12.f, 18.f, dim(), true);
+    const char* items[] = {"Kick", "Tight Kick", "Soft Kick", "Bass", "Sub Bass", "Lead", "Pads"};
+    const char* tags[] = {"One-shot", "One-shot", "Loop", "Loop", "One-shot", "Loop", "Loop"};
+    const char* durs[] = {"0:01", "0:01", "0:02", "0:15", "0:05", "0:30", "0:45"};
+    for (int i = 0; i < 7; ++i) {
+        Rect row{list.x + 8.f, list.y + 44.f + i * 48.f, list.w - 16.f, 42.f};
+        if (i == 0)
+            c.fillRoundRect(row, 6.f, Color::argb(0xFF2A2118));
+        c.drawText(items[i], row.x + 12.f, row.y + 10.f, 18.f, ink(), i == 0);
+        c.fillRoundRect({row.x + 272.f, row.y + 8.f, 92.f, 26.f}, 8.f, Color::argb(0xFF1A1614));
+        c.drawText(tags[i], row.x + 280.f, row.y + 10.f, 18.f, rod(), true);
+        if (i < 2) {
+            c.fillRoundRect({row.x + 372.f, row.y + 8.f, 72.f, 26.f}, 8.f, Color::argb(0xFF1A1614));
+            c.drawText("Drums", row.x + 380.f, row.y + 10.f, 18.f, rod(), true);
         }
-        c.drawText(cols[i], tile.x + 12.f, tile.y + 88.f, 18.f, ink(), true);
+        c.drawText(durs[i], row.x + 512.f, row.y + 10.f, 18.f, dim(), false);
+        glyphIcon(c, 6, row.x + row.w - 32.f, row.y + 12.f, i < 3 ? gold() : Color::argb(0xFF3C3732));
+    }
+
+    Rect wave{list.x, list.y + list.h + 16.f, list.w, h - (list.y + list.h + 28.f)};
+    panelBox(c, wave, 10.f);
+    const float mid = wave.y + wave.h * 0.5f;
+    for (int i = 0; i < static_cast<int>(wave.w) - 32; ++i) {
+        const float amp = 8.f + (wave.h * 0.28f) * std::fabs(std::sin(i * 0.08f) * std::sin(i * 0.015f));
+        c.fillRect({wave.x + 16.f + static_cast<float>(i), mid - amp, 1.f, amp * 2.f}, amber());
+    }
+    c.fillRoundRect({wave.x + wave.w - 56.f, wave.y + wave.h - 48.f, 36.f, 32.f}, 6.f, Color::argb(0xFF1A1614));
+    playGlyph(c, wave.x + wave.w - 44.f, wave.y + wave.h - 42.f, 16.f, rod());
+
+    Rect side{w - 280.f, rail.y, 264.f, h - kBarH - 24.f};
+    const char* previews[] = {"Kick", "Bass", "Lead", "Pads"};
+    for (int i = 0; i < 4; ++i) {
+        Rect card{side.x, side.y + i * ((side.h - 12.f) / 4.f), side.w, (side.h - 12.f) / 4.f - 12.f};
+        panelBox(c, card, 8.f);
+        c.drawText(previews[i], card.x + 12.f, card.y + 8.f, 18.f, ink(), true);
+        for (int k = 0; k < 28; ++k) {
+            const float amp = 6.f + 16.f * std::fabs(std::sin((k + i) * 0.55f));
+            c.fillRect({card.x + 16.f + k * 8.f, card.y + card.h * 0.62f - amp, 4.f, amp * 2.f}, amber());
+        }
     }
 }
 
@@ -1401,11 +1423,14 @@ Rect hitRect(Hit hit, float scale) {
     return {};
 }
 
-Hit hitTest(float x, float y, int, int, float scale) {
+Hit hitTest(float x, float y, int, int, float scale, View view) {
     const Hit order[] = {Hit::Arr, Hit::Ses, Hit::Perf, Hit::Mix, Hit::Play, Hit::Stop, Hit::Rec, Hit::Loop, Hit::Metro};
-    for (Hit hit : order)
+    for (Hit hit : order) {
+        if (view == View::Piano && (hit == Hit::Arr || hit == Hit::Ses || hit == Hit::Perf || hit == Hit::Mix))
+            continue;
         if (hitRect(hit, scale).contains(x, y))
             return hit;
+    }
     return Hit::None;
 }
 
