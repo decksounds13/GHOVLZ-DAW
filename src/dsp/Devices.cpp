@@ -1147,20 +1147,7 @@ public:
                     spec[static_cast<size_t>(n)] = acc[static_cast<size_t>(n)] * w;
                 }
                 fftRadix2(spec, false);
-                const int held = reading.load(std::memory_order_acquire);
-                const int pub = published.load(std::memory_order_acquire);
-                auto pick = [&](int skip) {
-                    for (int i = 0; i < 3; ++i)
-                        if (i != held && i != pub && i != skip)
-                            return i;
-                    for (int i = 0; i < 3; ++i)
-                        if (i != held && i != skip)
-                            return i;
-                    return 0;
-                };
-                int slot = pick(-1);
-                seq[slot].store(seq[slot].load(std::memory_order_relaxed) | 1u, std::memory_order_relaxed);
-                AnalyzerSnapshot& next = slots[slot];
+                AnalyzerSnapshot& next = slots[writerSlot];
                 for (int b = 0; b < 256; ++b) {
                     const float f0 = 20.f * std::pow(1000.f, b / 256.f);
                     const float f1 = 20.f * std::pow(1000.f, (b + 1) / 256.f);
@@ -1182,40 +1169,19 @@ public:
                 ms /= std::max(1, momentFill);
                 next.momentaryLufs = -0.691f + 10.f * std::log10(static_cast<float>(std::max(1e-12, ms)));
                 next.peakDb = gainToDb(peak);
-                auto publishSlot = [&](int index) {
-                    const uint32_t s = seq[index].load(std::memory_order_relaxed) | 1u;
-                    seq[index].store(s + 1, std::memory_order_release);
-                };
-                publishSlot(slot);
-                if (reading.load(std::memory_order_acquire) == slot) {
-                    const int alt = pick(slot);
-                    seq[alt].store(seq[alt].load(std::memory_order_relaxed) | 1u, std::memory_order_relaxed);
-                    slots[alt] = slots[slot];
-                    publishSlot(alt);
-                    slot = alt;
-                }
-                published.store(slot, std::memory_order_release);
+                // The writer fills writerSlot, then exchanges it with the idle slot.
+                // The reader exchanges the published slot out before copying it, so
+                // the two sides never touch the same slot.
+                writerSlot = idle.exchange(writerSlot, std::memory_order_acq_rel);
                 accCount = 0;
             }
         }
     }
     AnalyzerSnapshot copy() const {
-        for (int attempt = 0; attempt < 8; ++attempt) {
-            const int idx = published.load(std::memory_order_acquire);
-            reading.store(idx, std::memory_order_release);
-            const uint32_t a = seq[idx].load(std::memory_order_acquire);
-            if (a & 1u) {
-                reading.store(-1, std::memory_order_release);
-                continue;
-            }
-            AnalyzerSnapshot out = slots[idx];
-            const uint32_t b = seq[idx].load(std::memory_order_acquire);
-            reading.store(-1, std::memory_order_release);
-            if (a == b)
-                return out;
-        }
-        const int idx = published.load(std::memory_order_acquire);
-        return slots[idx];
+        const int got = idle.exchange(readerSlot, std::memory_order_acq_rel);
+        AnalyzerSnapshot out = slots[got];
+        readerSlot = got;
+        return out;
     }
     double sampleRate = 48000;
     std::vector<float> acc;
@@ -1227,9 +1193,9 @@ public:
     int scopePos = 0;
     Biquad k1, k2;
     AnalyzerSnapshot slots[3];
-    std::atomic<int> published {0};
-    mutable std::atomic<int> reading {-1};
-    std::atomic<uint32_t> seq[3] {};
+    int writerSlot = 2;
+    mutable int readerSlot = 0;
+    mutable std::atomic<int> idle {1};
 };
 
 class Missing : public Device {

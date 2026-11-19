@@ -19,6 +19,7 @@ public:
     void pump(const float* input = nullptr);
     void noteStopped();
     bool recover();
+    bool wantsReopen() const;
     bool running() const { return running_; }
     const char* backendName() const { return backend_; }
     const AudioSettings& settings() const { return settings_; }

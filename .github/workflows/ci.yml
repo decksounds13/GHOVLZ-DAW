@@ -39,3 +39,41 @@ jobs:
         run: cmake --build build --config Release
       - name: Test
         run: ctest --test-dir build -C Release --output-on-failure
+      - name: WARP screenshots
+        run: |
+          New-Item -ItemType Directory -Force -Path shots | Out-Null
+          & "build/bin/Release/GHOVLZ DAW.exe" --force-warp --simulate-device-lost --screenshot shots
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-warp-frames
+          path: shots
+
+  linux-asan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build pkg-config libasound2-dev libx11-dev ninja-build
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DGHOVLZ_SANITIZER=ON -DGHOVLZ_SANITIZER_KIND=address,undefined -DGHOVLZ_RT_ABORT=ON
+      - name: Build tests
+        run: cmake --build build --target GhovlzTests
+      - name: Test
+        run: ./build/bin/DEBUG/GhovlzTests
+
+  linux-tsan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y ninja-build pkg-config libasound2-dev libx11-dev
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DGHOVLZ_SANITIZER=ON -DGHOVLZ_SANITIZER_KIND=thread -DGHOVLZ_RT_ABORT=OFF
+      - name: Build tests
+        run: cmake --build build --target GhovlzTests
+      - name: Test
+        run: ./build/bin/DEBUG/GhovlzTests

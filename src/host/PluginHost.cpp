@@ -11,9 +11,11 @@
 #include "pluginterfaces/vst/ivstmessage.h"
 #include "pluginterfaces/vst/ivstparameterchanges.h"
 
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <map>
 #include <sstream>
@@ -304,9 +306,39 @@ public:
     }
 };
 
+class EditHandler final : public Steinberg::Vst::IComponentHandler {
+public:
+    Steinberg::tresult PLUGIN_API queryInterface(const Steinberg::TUID iid, void** obj) override {
+        const Steinberg::FUID id = Steinberg::FUID::fromTUID(iid);
+        if (id == Steinberg::Vst::IComponentHandler::iid || id == Steinberg::FUnknown::iid) {
+            *obj = static_cast<Steinberg::Vst::IComponentHandler*>(this);
+            return Steinberg::kResultOk;
+        }
+        *obj = nullptr;
+        return Steinberg::kNoInterface;
+    }
+    Steinberg::uint32 PLUGIN_API addRef() override { return 1000; }
+    Steinberg::uint32 PLUGIN_API release() override { return 1000; }
+    std::atomic<int> calls {0};
+    Steinberg::tresult PLUGIN_API beginEdit(Steinberg::Vst::ParamID) override {
+        calls.fetch_add(1, std::memory_order_relaxed);
+        return Steinberg::kResultOk;
+    }
+    Steinberg::tresult PLUGIN_API performEdit(Steinberg::Vst::ParamID, Steinberg::Vst::ParamValue) override {
+        calls.fetch_add(1, std::memory_order_relaxed);
+        return Steinberg::kResultOk;
+    }
+    Steinberg::tresult PLUGIN_API endEdit(Steinberg::Vst::ParamID) override {
+        calls.fetch_add(1, std::memory_order_relaxed);
+        return Steinberg::kResultOk;
+    }
+    Steinberg::tresult PLUGIN_API restartComponent(Steinberg::int32) override { return Steinberg::kResultOk; }
+};
+
 class Vst3Device : public Device {
 public:
     Steinberg::Vst::HostApplication host;
+    EditHandler edits;
     VST3::Hosting::Module::Ptr module;
     Steinberg::IPtr<Steinberg::Vst::IComponent> component;
     Steinberg::IPtr<Steinberg::Vst::IAudioProcessor> processor;
@@ -322,6 +354,10 @@ public:
     bool prepared = false;
     double sr = 48000;
     int maxBlock = 512;
+    double transportBpm = 120;
+    double transportPpq = 0;
+    bool transportPlaying = false;
+    int64_t transportSamples = 0;
 
     ~Vst3Device() override { shutdown(); }
 
@@ -355,6 +391,7 @@ public:
         using namespace Steinberg::Vst;
         component->activateBus(kAudio, kInput, 0, true);
         component->activateBus(kAudio, kOutput, 0, true);
+        component->activateBus(kEvent, kInput, 0, true);
         ProcessSetup setup{};
         setup.processMode = kRealtime;
         setup.symbolicSampleSize = kSample32;
@@ -377,53 +414,65 @@ public:
         if (bypass.load() || !prepared || !processor)
             return;
         using namespace Steinberg::Vst;
-        changes.reset();
-        events.reset();
         const int nparams = std::min(static_cast<int>(params.size()), static_cast<int>(paramIds.size()));
-        for (int i = 0; i < nparams && i < static_cast<int>(sent.size()); ++i) {
-            const float v = params[static_cast<size_t>(i)].target.load(std::memory_order_relaxed);
-            if (v == sent[static_cast<size_t>(i)])
-                continue;
-            Steinberg::int32 index = 0;
-            if (auto* queue = changes.addParameterData(paramIds[static_cast<size_t>(i)], index)) {
-                Steinberg::int32 point = 0;
-                queue->addPoint(0, v, point);
-                sent[static_cast<size_t>(i)] = v;
-            }
-        }
-        for (const auto& ev : midi.events) {
-            if (events.count >= 64)
-                break;
-            Event e {};
-            e.busIndex = 0;
-            e.sampleOffset = ev.sample;
-            e.ppqPosition = 0;
-            const uint8_t kind = ev.status & 0xF0;
-            if (kind == 0x90 && ev.data2 > 0) {
-                e.type = Event::kNoteOnEvent;
-                e.noteOn.channel = ev.status & 0x0F;
-                e.noteOn.pitch = ev.data1;
-                e.noteOn.velocity = ev.data2 / 127.f;
-                e.noteOn.noteId = ev.data1;
-            } else if (kind == 0x80 || (kind == 0x90 && ev.data2 == 0)) {
-                e.type = Event::kNoteOffEvent;
-                e.noteOff.channel = ev.status & 0x0F;
-                e.noteOff.pitch = ev.data1;
-                e.noteOff.velocity = 0.f;
-                e.noteOff.noteId = ev.data1;
-            } else {
-                continue;
-            }
-            events.items[events.count++] = e;
-        }
         float* ins[2] = {inL.data(), inR.data()};
         float* outs[2] = {outL.data(), outR.data()};
+        Steinberg::Vst::ProcessContext context{};
         for (int done = 0; done < audio.frames; done += maxBlock) {
             const int n = std::min(maxBlock, audio.frames - done);
+            changes.reset();
+            events.reset();
+            if (done == 0) {
+                for (int i = 0; i < nparams && i < static_cast<int>(sent.size()); ++i) {
+                    const float v = params[static_cast<size_t>(i)].target.load(std::memory_order_relaxed);
+                    if (v == sent[static_cast<size_t>(i)])
+                        continue;
+                    Steinberg::int32 index = 0;
+                    if (auto* queue = changes.addParameterData(paramIds[static_cast<size_t>(i)], index)) {
+                        Steinberg::int32 point = 0;
+                        queue->addPoint(0, v, point);
+                        sent[static_cast<size_t>(i)] = v;
+                    }
+                }
+            }
+            for (const auto& ev : midi.events) {
+                if (ev.sample < done || ev.sample >= done + n || events.count >= 64)
+                    continue;
+                Event e {};
+                e.busIndex = 0;
+                e.sampleOffset = ev.sample - done;
+                e.ppqPosition = transportPpq + static_cast<double>(ev.sample) / std::max(1.0, sr) * transportBpm / 60.0;
+                const uint8_t kind = ev.status & 0xF0;
+                if (kind == 0x90 && ev.data2 > 0) {
+                    e.type = Event::kNoteOnEvent;
+                    e.noteOn.channel = ev.status & 0x0F;
+                    e.noteOn.pitch = ev.data1;
+                    e.noteOn.velocity = ev.data2 / 127.f;
+                    e.noteOn.noteId = ev.data1;
+                } else if (kind == 0x80 || (kind == 0x90 && ev.data2 == 0)) {
+                    e.type = Event::kNoteOffEvent;
+                    e.noteOff.channel = ev.status & 0x0F;
+                    e.noteOff.pitch = ev.data1;
+                    e.noteOff.velocity = 0.f;
+                    e.noteOff.noteId = ev.data1;
+                } else {
+                    continue;
+                }
+                events.items[events.count++] = e;
+            }
             for (int i = 0; i < n; ++i) {
                 inL[static_cast<size_t>(i)] = audio.channels > 0 ? audio.ch(0)[done + i] : 0.f;
                 inR[static_cast<size_t>(i)] = audio.channels > 1 ? audio.ch(1)[done + i] : inL[static_cast<size_t>(i)];
+                outL[static_cast<size_t>(i)] = 0.f;
+                outR[static_cast<size_t>(i)] = 0.f;
             }
+            context.tempo = transportBpm;
+            context.sampleRate = sr;
+            context.projectTimeSamples = transportSamples + done;
+            context.projectTimeMusic = transportPpq + static_cast<double>(done) / std::max(1.0, sr) * transportBpm / 60.0;
+            context.state = transportPlaying ? ProcessContext::kPlaying : 0;
+            context.state |= ProcessContext::kTempoValid | ProcessContext::kProjectTimeMusicValid;
+            processData.processContext = &context;
             processData.setChannelBuffers(kInput, 0, ins, 2);
             processData.setChannelBuffers(kOutput, 0, outs, 2);
             processData.numSamples = n;
@@ -437,6 +486,28 @@ public:
                     audio.ch(1)[done + i] = outR[static_cast<size_t>(i)];
             }
         }
+    }
+
+    bool editParam(const std::string& param) override {
+        if (!controller)
+            return false;
+        const auto it = ids.find(param);
+        if (it == ids.end())
+            return false;
+        using namespace Steinberg::Vst;
+        const ParamID id = it->second;
+        const ParamValue value = controller->getParamNormalized(id);
+        edits.calls.store(0, std::memory_order_relaxed);
+        if (controller->setParamNormalized(id, value) != Steinberg::kResultOk)
+            return false;
+        return edits.calls.load(std::memory_order_relaxed) == 3;
+    }
+
+    void setTransport(double bpm, double ppq, bool playing, int64_t samples) override {
+        transportBpm = bpm > 0 ? bpm : 120;
+        transportPpq = ppq;
+        transportPlaying = playing;
+        transportSamples = samples;
     }
 
     int latency() const override {
@@ -461,6 +532,19 @@ public:
         stream.write(const_cast<char*>(raw.data()), static_cast<Steinberg::int32>(raw.size()), nullptr);
         stream.seek(0, Steinberg::IBStream::kIBSeekSet, nullptr);
         component->setState(&stream);
+        stream.seek(0, Steinberg::IBStream::kIBSeekSet, nullptr);
+        if (controller)
+            controller->setComponentState(&stream);
+        if (controller) {
+            for (auto& param : params) {
+                auto it = ids.find(param.id);
+                if (it == ids.end())
+                    continue;
+                param.value = static_cast<float>(controller->getParamNormalized(it->second));
+                param.target.store(param.value, std::memory_order_relaxed);
+                param.smoothed = param.value;
+            }
+        }
     }
 };
 
@@ -478,7 +562,21 @@ bool PluginHost::isBlacklisted(const std::string& pluginPath) const {
     return false;
 }
 
+namespace {
+std::string cacheStamp(const std::string& path) {
+    std::error_code ec;
+    const auto when = std::filesystem::last_write_time(path, ec).time_since_epoch().count();
+    if (ec)
+        return {};
+    return std::to_string(static_cast<long long>(when));
+}
+} // namespace
+
 bool PluginHost::scan(const std::string& pluginPath, std::string& error) {
+    if (pluginPath.empty() || !std::filesystem::exists(pluginPath)) {
+        error = "missing plugin";
+        return false;
+    }
     if (isBlacklisted(pluginPath)) {
         error = "blacklisted";
         return false;
@@ -486,6 +584,22 @@ bool PluginHost::scan(const std::string& pluginPath, std::string& error) {
     if (scanner_.empty()) {
         error = "scanner executable is not set";
         return false;
+    }
+    const std::string stamp = cacheStamp(pluginPath);
+    const std::string cachePath = blacklist_ + ".scan";
+    {
+        std::ifstream cache(cachePath);
+        std::string line;
+        while (std::getline(cache, line)) {
+            const auto t1 = line.find('\t');
+            const auto t2 = t1 == std::string::npos ? std::string::npos : line.find('\t', t1 + 1);
+            if (t1 == std::string::npos || t2 == std::string::npos)
+                continue;
+            if (line.substr(0, t1) == pluginPath && line.substr(t1 + 1, t2 - t1 - 1) == stamp) {
+                lastName_ = line.substr(t2 + 1);
+                return true;
+            }
+        }
     }
     std::string output;
     const int code = runProcess(scanner_, pluginPath, output);
@@ -504,6 +618,10 @@ bool PluginHost::scan(const std::string& pluginPath, std::string& error) {
     }
     if (lastName_.empty())
         lastName_ = "VST3";
+    if (!stamp.empty()) {
+        std::ofstream cache(cachePath, std::ios::app);
+        cache << pluginPath << '\t' << stamp << '\t' << lastName_ << '\n';
+    }
     return true;
 }
 
@@ -570,11 +688,15 @@ std::shared_ptr<Device> PluginHost::instantiate(const std::string& pluginPath, s
                 p.minV = 0.f;
                 p.maxV = 1.f;
                 p.value = static_cast<float>(dev->controller->getParamNormalized(info.id));
+                p.target.store(p.value, std::memory_order_relaxed);
+                p.smoothed = p.value;
                 dev->params.push_back(p);
                 dev->ids[p.id] = info.id;
                 dev->paramIds.push_back(info.id);
             }
         }
+        if (dev->controller)
+            dev->controller->setComponentHandler(&dev->edits);
         dev->type = "vst3";
         dev->name = ci.name();
         lastName_ = ci.name();

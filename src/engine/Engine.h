@@ -85,6 +85,7 @@ public:
         int rate = 48000;
         int channels = 2;
         int sessionScene = -1;
+        std::string track;
         std::string path;
         void* stream = nullptr;
     };

@@ -925,6 +925,7 @@ void Engine::setRecording(bool recording) {
             slot->mask = cap - 1;
             slot->startQ = playhead_.load();
             slot->rate = static_cast<int>(sampleRate_);
+            slot->track = t.id;
             slot->path = std::filesystem::temp_directory_path().string() + "/ghovlz-take-" + t.id + "-" + project_->newId("t") + ".wav";
             auto* stream = new WavStream();
             stream->open(slot->path, 2, slot->rate);
@@ -1207,6 +1208,8 @@ void Engine::finalizeTakes() {
         std::error_code ec;
         std::filesystem::remove(take.path, ec);
     };
+    for (auto& slot : retired_)
+        adopt(slot->track, *slot);
     for (auto& kv : recs_)
         adopt(kv.first, *kv.second);
     recs_.clear();

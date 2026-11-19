@@ -6,6 +6,7 @@
 #define MINIAUDIO_IMPLEMENTATION
 #include "miniaudio.h"
 
+#include <atomic>
 #include <string>
 #include <vector>
 
@@ -13,7 +14,7 @@ namespace ghovlz {
 
 struct DeviceBridge {
     Engine* engine = nullptr;
-    bool* needsReopen = nullptr;
+    std::atomic<bool>* needsReopen = nullptr;
 };
 
 struct AudioIO::Impl {
@@ -21,7 +22,7 @@ struct AudioIO::Impl {
     ma_device device {};
     bool contextReady = false;
     bool inited = false;
-    bool needsReopen = false;
+    std::atomic<bool> needsReopen {false};
     DeviceBridge bridge;
     FakeBackend fake;
     AsioBackend asio;
@@ -43,7 +44,7 @@ static void notifyCallback(const ma_device_notification* notification) {
     if (!bridge || !bridge->needsReopen)
         return;
     if (notification->type == ma_device_notification_type_stopped || notification->type == ma_device_notification_type_rerouted)
-        *bridge->needsReopen = true;
+        bridge->needsReopen->store(true, std::memory_order_release);
 }
 
 AudioIO::AudioIO() : impl_(new Impl) {}
@@ -164,13 +165,16 @@ void AudioIO::close() {
 
 void AudioIO::pump(const float* input) { impl_->fake.pump(input); }
 void AudioIO::noteStopped() {
-    impl_->needsReopen = true;
+    impl_->needsReopen.store(true, std::memory_order_release);
     impl_->fake.noteStopped();
 }
+bool AudioIO::wantsReopen() const {
+    return impl_->needsReopen.load(std::memory_order_acquire) || impl_->fake.needsReopen();
+}
 bool AudioIO::recover() {
-    if (!impl_->needsReopen && !impl_->fake.needsReopen())
+    if (!wantsReopen())
         return true;
-    impl_->needsReopen = false;
+    impl_->needsReopen.store(false, std::memory_order_release);
     return open(engine_, settings_);
 }
 

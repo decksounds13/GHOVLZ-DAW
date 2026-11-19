@@ -102,6 +102,12 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                         state->host->engine->play();
                 } else if (wp >= '1' && wp <= '8') {
                     state->host->frame.view = static_cast<View>(wp - '1');
+                } else if ((wp == 'Z' || wp == 'Y') && (GetKeyState(VK_CONTROL) & 0x8000) && state->host->project) {
+                    if (wp == 'Y' || (GetKeyState(VK_SHIFT) & 0x8000))
+                        state->host->undo.redo(*state->host->project);
+                    else
+                        state->host->undo.undo(*state->host->project);
+                    state->host->engine->setProject(state->host->project);
                 }
             }
             return 0;

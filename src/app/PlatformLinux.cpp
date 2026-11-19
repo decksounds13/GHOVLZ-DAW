@@ -1,5 +1,6 @@
 #include "app/Platform.h"
 
+#include "audio/AppSettings.h"
 #include "audio/AudioIO.h"
 #include "midi/MidiIO.h"
 #include "ui/Canvas.h"
@@ -65,8 +66,15 @@ int runWindow(AppHost& host) {
     GC gc = XCreateGC(dpy, win, 0, nullptr);
 
     AudioIO audio;
-    if (audio.open(host.engine, 48000))
-        host.frame.audioBackend = audio.backendName();
+    const AppSettings saved = AppSettings::load(AppSettings::userPath());
+    const OpenFallback opened = openOrFallback(saved, [&](const AudioSettings& settings) { return audio.open(host.engine, settings); });
+    host.frame.audioBackend = audio.backendName();
+    host.frame.prefBackend = opened.used.backend;
+    host.frame.prefDevice = opened.used.device.empty() ? "Default" : opened.used.device;
+    host.frame.prefRate = opened.used.sampleRate;
+    host.frame.prefFrames = opened.used.frames;
+    host.frame.prefMessage = opened.message;
+    int reopenAttempt = 0;
     MidiIO midi;
     midi.open();
     host.frame.midiPort = midi.portName();
@@ -108,12 +116,29 @@ int runWindow(AppHost& host) {
                         host.engine->stop();
                     else
                         host.engine->play();
-                } else if (sym >= XK_1 && sym <= XK_8) {
+                }                 else if (sym >= XK_1 && sym <= XK_8) {
                     host.frame.view = static_cast<View>(sym - XK_1);
+                } else if ((sym == XK_z || sym == XK_Z) && (ev.xkey.state & ControlMask) && host.project) {
+                    if (ev.xkey.state & ShiftMask)
+                        host.undo.redo(*host.project);
+                    else
+                        host.undo.undo(*host.project);
+                    host.engine->setProject(host.project);
+                } else if ((sym == XK_y || sym == XK_Y) && (ev.xkey.state & ControlMask) && host.project) {
+                    host.undo.redo(*host.project);
+                    host.engine->setProject(host.project);
                 }
             } else if (ev.type == DestroyNotify) {
                 quit = true;
             }
+        }
+        if (audio.wantsReopen()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(recoverBackoffMs(reopenAttempt)));
+            if (audio.recover())
+                reopenAttempt = 0;
+            else
+                ++reopenAttempt;
+            host.frame.audioBackend = audio.backendName();
         }
         midi.poll();
         host.frame.playing = host.engine->playing();

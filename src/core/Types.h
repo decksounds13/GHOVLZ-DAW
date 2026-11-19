@@ -245,6 +245,7 @@ public:
     virtual std::string pluginState() const { return {}; }
     virtual void setPluginState(const std::string&) {}
     virtual void setTransport(double, double, bool, int64_t) {}
+    virtual bool editParam(const std::string&) { return false; }
     virtual bool attachEditor(void*, float) { return false; }
     virtual void resizeEditor(int, int) {}
     virtual void closeEditor() {}

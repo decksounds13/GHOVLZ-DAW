@@ -1,8 +1,16 @@
 #pragma once
 
+#include <cstdint>
 #include <string>
 
 namespace ghovlz {
+
+// RtMidi stamps are seconds. 1 ms at 48 kHz is 48 samples.
+inline int sampleOffsetFromSeconds(double seconds, double sampleRate) {
+    const double shifted = seconds * sampleRate;
+    const double rounded = shifted >= 0 ? shifted + 0.5 : shifted - 0.5;
+    return static_cast<int>(rounded);
+}
 
 class MidiIO {
 public:
