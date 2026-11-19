@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="360" height="520" viewBox="0 0 360 520">
+  <rect width="360" height="520" fill="#0A0A0A"/>
+  <rect x="8" y="8" width="344" height="504" rx="10" fill="#161311" stroke="#3C3732"/>
+  <rect x="8" y="8" width="5" height="504" fill="#B49637"/>
+  <text x="24" y="36" fill="#F5F5F5" font-family="ui-sans-serif, sans-serif" font-size="18" font-weight="700">DRIFT</text>
+  <text x="250" y="36" fill="#A39890" font-family="ui-sans-serif, sans-serif" font-size="11">TUBE</text>
+  <rect x="24" y="52" width="312" height="150" rx="6" fill="#100E0C" stroke="#3C3732"/>
+  <text x="36" y="70" fill="#A39890" font-family="ui-sans-serif, sans-serif" font-size="10">TRANSFER  L gold   R amber</text>
+  <path d="M48 170 C 90 168, 120 150, 160 100 S 250 40, 312 36" fill="none" stroke="#B49637" stroke-width="2"/>
+  <path d="M48 176 C 100 174, 130 120, 180 110 S 260 70, 312 48" fill="none" stroke="#FF821E" stroke-width="2"/>
+  <line x1="180" y1="60" x2="180" y2="188" stroke="#3C3732"/>
+  <line x1="40" y1="124" x2="320" y2="124" stroke="#3C3732"/>
+  <g font-family="ui-sans-serif, sans-serif" font-size="10" fill="#A39890">
+    <text x="70" y="230">DRIVE</text>
+    <text x="154" y="230">MOTION</text>
+    <text x="230" y="230">CORR</text>
+    <text x="292" y="230">OFFSET</text>
+  </g>
+  <g fill="none" stroke="#3C3732" stroke-width="8">
+    <circle cx="86" cy="262" r="22"/>
+    <circle cx="170" cy="262" r="22"/>
+    <circle cx="246" cy="262" r="22"/>
+    <circle cx="314" cy="262" r="22"/>
+  </g>
+  <g fill="none" stroke="#FF6E00" stroke-width="3" stroke-linecap="round">
+    <path d="M86 262 m -14 8 a 16 16 0 1 1 28 0"/>
+    <path d="M170 262 m -16 4 a 16 16 0 1 1 20 -12"/>
+    <path d="M246 262 m -8 14 a 16 16 0 1 1 22 -4"/>
+    <path d="M314 262 m -16 0 a 16 16 0 1 1 10 -14"/>
+  </g>
+  <g stroke="#D1BCAC" stroke-width="2">
+    <line x1="86" y1="262" x2="86" y2="244"/>
+    <line x1="170" y1="262" x2="182" y2="250"/>
+    <line x1="246" y1="262" x2="258" y2="252"/>
+    <line x1="314" y1="262" x2="306" y2="246"/>
+  </g>
+  <text x="24" y="312" fill="#A39890" font-family="ui-sans-serif, sans-serif" font-size="10">CORR 0 = L equals R    CORR 1 = independent</text>
+  <rect x="24" y="328" width="200" height="14" rx="3" fill="#221E1A" stroke="#3C3732"/>
+  <rect x="24" y="328" width="148" height="14" rx="3" fill="#B49637"/>
+  <text x="232" y="339" fill="#DAA520" font-family="ui-sans-serif, sans-serif" font-size="10">OUT 0.62</text>
+  <text x="24" y="366" fill="#A39890" font-family="ui-sans-serif, sans-serif" font-size="10">HARM  H2 H3 H4 H5</text>
+  <g fill="#B49637">
+    <rect x="24" y="400" width="10" height="28"/>
+    <rect x="40" y="386" width="10" height="42"/>
+    <rect x="56" y="406" width="10" height="22"/>
+    <rect x="72" y="394" width="10" height="34"/>
+  </g>
+  <g fill="#FF821E">
+    <rect x="100" y="392" width="10" height="36"/>
+    <rect x="116" y="408" width="10" height="20"/>
+    <rect x="132" y="384" width="10" height="44"/>
+    <rect x="148" y="400" width="10" height="28"/>
+  </g>
+  <text x="24" y="450" fill="#A39890" font-family="ui-sans-serif, sans-serif" font-size="10">gold = left    amber = right    loudness matched</text>
+  <rect x="24" y="468" width="70" height="24" rx="4" fill="#221E1A" stroke="#B49637"/>
+  <text x="36" y="484" fill="#F5F5F5" font-family="ui-sans-serif, sans-serif" font-size="11">L / R</text>
+  <rect x="102" y="468" width="70" height="24" rx="4" fill="#221E1A" stroke="#3C3732"/>
+  <text x="114" y="484" fill="#A39890" font-family="ui-sans-serif, sans-serif" font-size="11">M / S</text>
+  <rect x="250" y="468" width="86" height="24" rx="4" fill="#221E1A" stroke="#3C3732"/>
+  <text x="266" y="484" fill="#DAA520" font-family="ui-sans-serif, sans-serif" font-size="11">4x OS</text>
+</svg>
