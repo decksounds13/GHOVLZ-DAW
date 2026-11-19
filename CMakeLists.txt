@@ -107,7 +107,10 @@ add_library(ghovlz_core STATIC
     src/dsp/Devices.cpp
     src/io/WavFile.cpp
     src/model/Project.cpp
+    src/model/Undo.cpp
+    src/io/DiskWriter.cpp
     src/engine/Engine.cpp
+    src/ui/Theme.cpp
     src/host/PluginHost.cpp
     src/audio/FakeBackend.cpp)
 target_include_directories(ghovlz_core PUBLIC "${CMAKE_SOURCE_DIR}/src")
@@ -134,8 +137,10 @@ if(UNIX AND NOT APPLE)
     target_link_libraries(GhovlzPluginScan PRIVATE pthread dl)
 endif()
 
-add_executable(GhovlzTests tests/Tests.cpp)
+add_executable(GhovlzTests tests/Tests.cpp tests/ThemeTests.cpp src/ui/Paint.cpp src/ui/SoftwareCanvas.cpp)
 target_link_libraries(GhovlzTests PRIVATE ghovlz_core Catch2::Catch2WithMain)
+target_include_directories(GhovlzTests PRIVATE "${stb_SOURCE_DIR}")
+target_compile_definitions(GhovlzTests PRIVATE GHOVLZ_ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets")
 add_dependencies(GhovlzTests GhovlzTestGain GhovlzCrash GhovlzPluginScan)
 
 if(WIN32)

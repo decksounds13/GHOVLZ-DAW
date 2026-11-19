@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <string_view>
 
 namespace ghovlz {
 namespace {
@@ -81,8 +82,10 @@ json trackJson(const Track& t) {
     json sends = json::array();
     for (const auto& s : t.sends)
         sends.push_back({{"target", s.target}, {"db", s.levelDb}, {"pre", s.pre}});
+    const char* monitor = t.monitor == MonitorMode::In ? "in" : t.monitor == MonitorMode::Off ? "off" : "auto";
     return {{"id", t.id}, {"name", t.name}, {"type", trackTypeName(t.type)}, {"output", t.output},
             {"volumeDb", t.volumeDb}, {"pan", t.pan}, {"mute", t.mute}, {"solo", t.solo}, {"arm", t.arm},
+            {"monitor", monitor},
             {"color", colorHex(t.color)}, {"devices", devices}, {"clips", clips}, {"slots", slots}, {"sends", sends}};
 }
 Track trackFrom(const json& j) {
@@ -96,6 +99,8 @@ Track trackFrom(const json& j) {
     t.mute = j.value("mute", false);
     t.solo = j.value("solo", false);
     t.arm = j.value("arm", false);
+    const std::string monitor = j.value("monitor", "auto");
+    t.monitor = monitor == "in" ? MonitorMode::In : monitor == "off" ? MonitorMode::Off : MonitorMode::Auto;
     t.color = parseColor(j.value("color", "#3C3732"), 0xFF3C3732);
     if (j.contains("devices"))
         for (const auto& d : j["devices"]) t.devices.push_back(deviceFrom(d));
@@ -171,6 +176,28 @@ std::string Project::newId(const char* prefix) {
 }
 
 bool Project::saveToFolder(const std::string& folder) const {
+    constexpr std::string_view kStaging = ".ghovlz-tmp";
+    if (folder.size() < kStaging.size() ||
+        std::string_view(folder).substr(folder.size() - kStaging.size()) != kStaging) {
+        namespace fs = std::filesystem;
+        const std::string tmp = folder + ".ghovlz-tmp";
+        std::error_code ec;
+        fs::remove_all(tmp, ec);
+        if (!saveToFolder(tmp))
+            return false;
+        const std::string bak = folder + ".ghovlz-bak";
+        fs::remove_all(bak, ec);
+        if (fs::exists(folder)) {
+            fs::rename(folder, bak, ec);
+            if (ec)
+                return false;
+        }
+        fs::rename(tmp, folder, ec);
+        if (ec)
+            return false;
+        fs::remove_all(bak, ec);
+        return true;
+    }
     namespace fs = std::filesystem;
     std::error_code ec;
     fs::create_directories(folder + "/audio", ec);
@@ -182,7 +209,8 @@ bool Project::saveToFolder(const std::string& folder) const {
         const int frames = static_cast<int>(m->interleaved.size() / std::max(1, m->channels));
         if (!writeWav24(folder + "/" + rel, m->interleaved.data(), m->channels, frames, m->sampleRate))
             return false;
-        mediaList.push_back({{"id", kv.first}, {"file", rel}, {"sampleRate", m->sampleRate}, {"channels", m->channels}});
+        mediaList.push_back({{"id", kv.first}, {"name", m->name}, {"bpm", m->bpm}, {"file", rel},
+                             {"sampleRate", m->sampleRate}, {"channels", m->channels}});
     }
     json markersJ = json::array();
     for (const auto& m : markers)
@@ -191,7 +219,7 @@ bool Project::saveToFolder(const std::string& folder) const {
     for (const auto& lane : automation) {
         json pts = json::array();
         for (const auto& pt : lane.points) pts.push_back({{"q", pt.quarter}, {"v", pt.value}});
-        lanes.push_back({{"id", lane.id}, {"points", pts}});
+        lanes.push_back({{"id", lane.id}, {"steps", lane.steps}, {"points", pts}});
     }
     json tracksJ = json::array();
     for (const auto& t : tracks) tracksJ.push_back(trackJson(t));
@@ -210,12 +238,32 @@ bool Project::saveToFolder(const std::string& folder) const {
     return static_cast<bool>(o);
 }
 
+bool Project::collectAndSave(const std::string& folder) {
+    for (auto& kv : media) {
+        if (!kv.second || kv.second->sourcePath.empty() || !kv.second->interleaved.empty())
+            continue;
+        WavData wav;
+        if (!readWav(kv.second->sourcePath, wav))
+            continue;
+        auto copy = std::make_shared<Media>(*kv.second);
+        copy->sampleRate = wav.sampleRate;
+        copy->channels = wav.channels;
+        copy->interleaved = std::move(wav.interleaved);
+        kv.second = copy;
+    }
+    return saveToFolder(folder);
+}
+
 bool Project::loadFromFolder(const std::string& folder) {
     std::ifstream in(folder + "/project.json");
     if (!in) return false;
     json root;
-    try { in >> root; } catch (...) { return false; }
+    try {
+    in >> root;
     format = root.value("format", 1);
+    if (format < 2)
+        format = 2;
+    missingMedia.clear();
     name = root.value("name", "Untitled");
     bpm = root.value("bpm", 120.0);
     if (root.contains("timeSignature") && root["timeSignature"].size() == 2) {
@@ -249,6 +297,7 @@ bool Project::loadFromFolder(const std::string& folder) {
         for (const auto& lane : root["automation"]) {
             Lane L;
             L.id = lane.value("id", "");
+            L.steps = lane.value("steps", false);
             if (lane.contains("points"))
                 for (const auto& pt : lane["points"])
                     L.points.push_back(AutoPoint{pt.value("q", 0.0), pt.value("v", 0.f)});
@@ -259,9 +308,14 @@ bool Project::loadFromFolder(const std::string& folder) {
     if (root.contains("media")) {
         for (const auto& m : root["media"]) {
             WavData wav;
-            if (!readWav(folder + "/" + m.value("file", ""), wav)) continue;
+            if (!readWav(folder + "/" + m.value("file", ""), wav)) {
+                missingMedia.push_back(m.value("id", ""));
+                continue;
+            }
             auto mediaObj = std::make_shared<Media>();
             mediaObj->id = m.value("id", "");
+            mediaObj->name = m.value("name", "");
+            mediaObj->bpm = m.value("bpm", 120.0);
             mediaObj->sampleRate = wav.sampleRate;
             mediaObj->channels = wav.channels;
             mediaObj->interleaved = std::move(wav.interleaved);
@@ -269,6 +323,9 @@ bool Project::loadFromFolder(const std::string& folder) {
         }
     }
     return true;
+    } catch (...) {
+        return false;
+    }
 }
 
 Project Project::makeEmpty() {

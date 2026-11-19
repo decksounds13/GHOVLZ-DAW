@@ -11,6 +11,59 @@
 #include <vector>
 
 namespace ghovlz {
+
+const Theme* activeTheme = nullptr;
+const Theme& active() { return activeTheme ? *activeTheme : Theme::defaultTheme(); }
+struct ThemeBind {
+    const Theme* prev;
+    explicit ThemeBind(const Theme* theme) : prev(activeTheme) { activeTheme = theme ? theme : &Theme::defaultTheme(); }
+    ~ThemeBind() { activeTheme = prev; }
+};
+
+void stereoMeter(Canvas& c, Rect r, float peakL, float peakR, float rmsL, float rmsR, float holdL, float holdR,
+                 bool clipped, const MeterStyle& style) {
+    c.fillRect(r, style.background);
+    const float lampH = std::min(8.f, r.h * 0.08f);
+    const Rect body{r.x, r.y + lampH + 2.f, r.w, std::max(4.f, r.h - lampH - 2.f)};
+    c.fillRect({r.x, r.y, r.w, lampH}, clipped ? style.clip : style.unlit);
+    const float gap = std::max(1.f, style.gapPx);
+    const float colW = std::max(2.f, (body.w - gap) * 0.5f);
+    auto column = [&](float x, float peak, float rms, float hold) {
+        c.fillRect({x, body.y, colW, body.h}, style.gap);
+        const float seg = std::max(1.f, style.segmentPx);
+        const float pitch = seg + style.gapPx;
+        const int count = std::max(1, static_cast<int>(std::floor((body.h + style.gapPx) / pitch)));
+        const float peakDb = peak <= 1.0e-5f ? style.floorDb : 20.f * std::log10(std::max(peak, 1.0e-8f));
+        for (int i = 0; i < count; ++i) {
+            const float db = style.floorDb + ((static_cast<float>(i) + 0.5f) / static_cast<float>(count)) * (style.ceilDb - style.floorDb);
+            const bool lit = peakDb >= db;
+            const Color col = lit ? style.lut[static_cast<size_t>(style.lutIndex(db))] : style.unlit;
+            const float y = body.y + body.h - (static_cast<float>(i) + 1.f) * seg - static_cast<float>(i) * style.gapPx;
+            c.fillRect({x, y, colW, seg}, col);
+        }
+        if (rms > 1.0e-5f) {
+            const float rmsDb = 20.f * std::log10(std::max(rms, 1.0e-8f));
+            const float t = std::clamp((rmsDb - style.floorDb) / std::max(1.0e-3f, style.ceilDb - style.floorDb), 0.f, 1.f);
+            const float innerW = std::max(1.f, colW * style.rmsWidth);
+            const float innerH = body.h * t;
+            c.fillRect({x + (colW - innerW) * 0.5f, body.y + body.h - innerH, innerW, innerH}, style.rms);
+        }
+        const float holdDb = hold <= 1.0e-5f ? style.floorDb : 20.f * std::log10(std::max(hold, 1.0e-8f));
+        const float ht = std::clamp((holdDb - style.floorDb) / std::max(1.0e-3f, style.ceilDb - style.floorDb), 0.f, 1.f);
+        c.fillRect({x, body.y + body.h - body.h * ht - 1.f, colW, 2.f}, style.peakHold);
+    };
+    column(body.x, peakL, rmsL, holdL);
+    column(body.x + colW + gap, peakR, rmsR, holdR);
+}
+
+void paintMeterCard(Canvas& canvas, const Theme& theme, float peakL, float peakR, float rmsL, float rmsR, float holdL,
+                    float holdR, bool clip) {
+    ThemeBind bind(&theme);
+    canvas.clear(theme.color(Role::Bg));
+    stereoMeter(canvas, {24.f, 16.f, 56.f, static_cast<float>(canvas.height()) - 32.f}, peakL, peakR, rmsL, rmsR, holdL,
+                holdR, clip, theme.meter);
+}
+
 namespace {
 
 constexpr float kPi = 3.14159265f;
@@ -22,16 +75,31 @@ constexpr float kTx = 492.f;
 constexpr float kBtn = 34.f;
 constexpr float kBtnGap = 8.f;
 
-Color ink() { return Color::argb(0xFFF5F5F5); }
-Color dim() { return Color::argb(0xFFA39890); }
-Color gold() { return Color::argb(0xFFB49637); }
-Color rod() { return Color::argb(0xFFDAA520); }
-Color amber() { return Color::argb(0xFFFF821E); }
-Color orange() { return Color::argb(0xFFFF6E00); }
-Color panel() { return Color::argb(0xFF161311); }
-Color panel2() { return Color::argb(0xFF221E1A); }
-Color line() { return Color::argb(0xFF3C3732); }
-Color bg() { return Color::argb(0xFF0A0A0A); }
+Color ink() { return active().color(Role::Ink); }
+Color dim() { return active().color(Role::Dim); }
+Color gold() { return active().color(Role::Gold); }
+Color rod() { return active().color(Role::Rod); }
+Color amber() { return active().color(Role::Amber); }
+Color orange() { return active().color(Role::Orange); }
+Color panel() { return active().color(Role::Panel); }
+Color panel2() { return active().color(Role::Panel2); }
+Color line() { return active().color(Role::Line); }
+Color bg() { return active().color(Role::Bg); }
+
+void drawStereo(Canvas& c, const Frame& f, const std::string& track, Rect r, float fallback) {
+    Engine::TrackLevels lv;
+    if (f.engine)
+        lv = f.engine->levels(track);
+    else {
+        lv.peakL = fallback;
+        lv.peakR = fallback * 0.72f;
+        lv.rmsL = fallback * 0.45f;
+        lv.rmsR = fallback * 0.3f;
+        lv.holdL = fallback;
+        lv.holdR = fallback * 0.8f;
+    }
+    stereoMeter(c, r, lv.peakL, lv.peakR, lv.rmsL, lv.rmsR, lv.holdL, lv.holdR, lv.clip, active().meter);
+}
 
 std::string positionText(double q) {
     if (q < 0)
@@ -118,27 +186,6 @@ float knobNorm(float v) {
     return dbNorm(v);
 }
 
-void stereoMeter(Canvas& c, Rect r, float peak, float hold, bool clipped) {
-    c.fillRoundRect(r, 2.f, Color::argb(0xFF100E0C));
-    const float gap = 2.f;
-    const float bw = std::max(3.f, (r.w - gap) * 0.5f);
-    auto column = [&](float x) {
-        const float db = peak <= 1.0e-5f ? -60.f : 20.f * std::log10(peak);
-        const float t = std::clamp((db + 60.f) / 66.f, 0.f, 1.f);
-        const int h = static_cast<int>(r.h * t);
-        for (int i = 0; i < h; ++i) {
-            const float dbHere = -60.f + (static_cast<float>(i) / std::max(1.f, r.h)) * 66.f;
-            const Color col = dbHere >= -3.f ? Color::argb(0xFFE23D2C) : dbHere >= -12.f ? rod() : Color::argb(0xFF3FA34D);
-            c.fillRect({x, r.y + r.h - static_cast<float>(i) - 1.f, bw, 1.f}, col);
-        }
-        const float hd = hold <= 1.0e-5f ? -60.f : 20.f * std::log10(hold);
-        const float ht = std::clamp((hd + 60.f) / 66.f, 0.f, 1.f);
-        c.fillRect({x, r.y + r.h - r.h * ht - 1.f, bw, 2.f}, ink());
-    };
-    column(r.x + 1.f);
-    column(r.x + 1.f + bw + gap);
-    c.fillRoundRect({r.x, r.y - 8.f, r.w, 6.f}, 2.f, clipped ? Color::argb(0xFFE23D2C) : Color::argb(0xFF2A1614));
-}
 
 const Media* mediaOf(const Project* p, const std::string& id) {
     if (!p)
@@ -367,9 +414,7 @@ void arrangement(Canvas& c, const Frame& f) {
         pill(c, {laneR + 30.f, y + 6.f, 18.f, 15.f}, "M", t->mute);
         pill(c, {laneR + 50.f, y + 6.f, 18.f, 15.f}, "S", t->solo);
         pill(c, {laneR + 30.f, y + 24.f, 36.f, 15.f}, "Arm", t->arm);
-        const float pk = f.engine ? f.engine->meter(t->id) : 0.f;
-        const float hold = f.engine ? f.engine->holdMeter(t->id) : pk;
-        stereoMeter(c, {laneR + 70.f, y + 10.f, 16.f, rowH - 22.f}, pk, hold, f.engine && f.engine->clipLamp(t->id));
+        drawStereo(c, f, t->id, {laneR + 70.f, y + 10.f, 16.f, rowH - 22.f}, 0.35f);
         c.line(hx, y, hx, y + rowH, rod(), 1.4f);
     }
     c.fillRoundRect({hx - 22.f, rulerY + 18.f, 52.f, 16.f}, 3.f, gold());
@@ -386,9 +431,7 @@ void arrangement(Canvas& c, const Frame& f) {
             panelBox(c, r, 8.f);
             c.fillRect({r.x, r.y, 4.f, r.h}, gold());
             c.drawText(d.name, r.x + 14.f, r.y + 10.f, 18.f, ink(), true);
-            const float pk = f.engine ? f.engine->meter(chain->id) : 0.4f;
-            stereoMeter(c, {r.x + r.w - 28.f, r.y + 36.f, 16.f, r.h - 52.f}, pk * (0.5f + 0.15f * static_cast<float>(i)), pk,
-                        false);
+            drawStereo(c, f, chain->id, {r.x + r.w - 28.f, r.y + 36.f, 16.f, r.h - 52.f}, 0.4f);
             int shown = 0;
             for (const auto& pr : d.params) {
                 if (shown >= 4)
@@ -527,10 +570,7 @@ void mixer(Canvas& c, const Frame& f) {
             const float my = faderBot - dbNorm(markDb[m]) * (faderBot - faderTop);
             c.drawText(marks[m], r.x + 6.f, my - 6.f, 11.f, dim(), false);
         }
-        const float pk = f.engine ? f.engine->meter(t->id) : 0.f;
-        const float hold = f.engine ? f.engine->holdMeter(t->id) : pk;
-        stereoMeter(c, {r.x + r.w - 36.f, faderTop, 22.f, faderBot - faderTop}, pk, hold,
-                    f.engine && f.engine->clipLamp(t->id));
+        drawStereo(c, f, t->id, {r.x + r.w - 36.f, faderTop, 22.f, faderBot - faderTop}, 0.4f);
         pill(c, {r.x + 8.f, r.y + r.h - 28.f, 22.f, 18.f}, "M", t->mute);
         pill(c, {r.x + 34.f, r.y + r.h - 28.f, 22.f, 18.f}, "S", t->solo);
         pill(c, {r.x + 60.f, r.y + r.h - 28.f, 36.f, 18.f}, "Arm", t->arm);
@@ -551,8 +591,7 @@ void deviceChain(Canvas& c, const Frame& f) {
         panelBox(c, r, 10.f);
         c.fillRect({r.x, r.y, 5.f, r.h}, gold());
         c.drawText(d.name, r.x + 18.f, r.y + 16.f, 22.f, ink(), true);
-        const float pk = f.engine ? f.engine->meter(chain->id) : 0.35f;
-        stereoMeter(c, {r.x + r.w - 40.f, r.y + 70.f, 24.f, r.h - 110.f}, pk * (0.45f + 0.15f * static_cast<float>(i)), pk, false);
+        drawStereo(c, f, chain->id, {r.x + r.w - 40.f, r.y + 70.f, 24.f, r.h - 110.f}, 0.35f);
         int shown = 0;
         for (const auto& pr : d.params) {
             if (shown >= 6)
@@ -631,7 +670,25 @@ void pluginWindow(Canvas& c, const Frame& f) {
 
 } // namespace
 
+void preferences(Canvas& c, const Frame& f) {
+    c.drawText("Settings", 28.f, kBarH + 20.f, 22.f, ink(), true);
+    c.drawText(std::string("Theme  ") + active().name, 28.f, kBarH + 58.f, 16.f, gold(), true);
+    const std::string rows[] = {
+        std::string("Backend  ") + f.prefBackend,
+        std::string("Device  ") + f.prefDevice,
+        std::string("Rate  ") + std::to_string(f.prefRate),
+        std::string("Buffer  ") + std::to_string(f.prefFrames),
+        std::string("MIDI  ") + (f.midiPort.empty() ? "none" : f.midiPort),
+        std::string("Renderer  ") + f.prefRenderer,
+    };
+    for (int i = 0; i < 6; ++i)
+        c.drawText(rows[i], 28.f, kBarH + 100.f + static_cast<float>(i) * 28.f, 16.f, dim(), false);
+    if (!f.prefMessage.empty())
+        c.drawText(f.prefMessage, 28.f, kBarH + 280.f, 16.f, amber(), false);
+}
+
 void paintFrame(Canvas& c, const Frame& frame) {
+    ThemeBind bind(frame.theme);
     c.clear(bg());
     topBar(c, frame);
     switch (frame.view) {
@@ -643,22 +700,35 @@ void paintFrame(Canvas& c, const Frame& frame) {
         case View::Piano: piano(c, frame); break;
         case View::Browser: browser(c, frame); break;
         case View::Plugin: pluginWindow(c, frame); break;
+        case View::Prefs: preferences(c, frame); break;
     }
 }
 
-Hit hitTest(float x, float y, int, int) {
-    if (y >= 12.f && y <= 42.f) {
-        for (int i = 0; i < 4; ++i) {
-            Rect r{kViewsX + i * (kViewW + kViewGap), 12.f, kViewW, 30.f};
-            if (r.contains(x, y))
-                return static_cast<Hit>(static_cast<int>(Hit::Arr) + i);
-        }
-        for (int i = 0; i < 5; ++i) {
-            Rect r{kTx + i * (kBtn + kBtnGap), 10.f, kBtn, kBtn};
-            if (r.contains(x, y))
-                return static_cast<Hit>(static_cast<int>(Hit::Play) + i);
-        }
+Rect hitRect(Hit hit, float scale) {
+    if (scale <= 0.f)
+        scale = 1.f;
+    auto scaled = [scale](Rect r) { return Rect{r.x * scale, r.y * scale, r.w * scale, r.h * scale}; };
+    switch (hit) {
+        case Hit::Arr: return scaled({kViewsX, 12.f, kViewW, 30.f});
+        case Hit::Ses: return scaled({kViewsX + (kViewW + kViewGap), 12.f, kViewW, 30.f});
+        case Hit::Perf: return scaled({kViewsX + 2.f * (kViewW + kViewGap), 12.f, kViewW, 30.f});
+        case Hit::Mix: return scaled({kViewsX + 3.f * (kViewW + kViewGap), 12.f, kViewW, 30.f});
+        case Hit::Play: return scaled({kTx, 10.f, kBtn, kBtn});
+        case Hit::Stop: return scaled({kTx + (kBtn + kBtnGap), 10.f, kBtn, kBtn});
+        case Hit::Rec: return scaled({kTx + 2.f * (kBtn + kBtnGap), 10.f, kBtn, kBtn});
+        case Hit::Loop: return scaled({kTx + 3.f * (kBtn + kBtnGap), 10.f, kBtn, kBtn});
+        case Hit::Metro: return scaled({kTx + 4.f * (kBtn + kBtnGap), 10.f, kBtn, kBtn});
+        case Hit::Badge: return scaled({kViewsX, 12.f, 4.f * kViewW + 3.f * kViewGap, 30.f});
+        case Hit::None: break;
     }
+    return {};
+}
+
+Hit hitTest(float x, float y, int, int, float scale) {
+    const Hit order[] = {Hit::Arr, Hit::Ses, Hit::Perf, Hit::Mix, Hit::Play, Hit::Stop, Hit::Rec, Hit::Loop, Hit::Metro};
+    for (Hit hit : order)
+        if (hitRect(hit, scale).contains(x, y))
+            return hit;
     return Hit::None;
 }
 

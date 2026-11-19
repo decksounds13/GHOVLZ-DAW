@@ -31,8 +31,28 @@ struct AudioBuffer {
         const size_t need = static_cast<size_t>(channels) * static_cast<size_t>(frames);
         std::fill(data.begin(), data.begin() + static_cast<std::ptrdiff_t>(std::min(need, data.size())), 0.f);
     }
-    float* ch(int c) { return data.data() + static_cast<size_t>(c) * static_cast<size_t>(frames); }
-    const float* ch(int c) const { return data.data() + static_cast<size_t>(c) * static_cast<size_t>(frames); }
+    float* ch(int c) {
+        if (external)
+            return ext_[std::clamp(c, 0, 1)];
+        return data.data() + static_cast<size_t>(c) * static_cast<size_t>(frames);
+    }
+    const float* ch(int c) const {
+        if (external)
+            return ext_[std::clamp(c, 0, 1)];
+        return data.data() + static_cast<size_t>(c) * static_cast<size_t>(frames);
+    }
+    // A window onto another buffer. No allocation. ch() points at src + offset.
+    bool external = false;
+    float* ext_[2] {};
+    void view(AudioBuffer& src, int offset, int count) {
+        external = true;
+        channels = src.channels;
+        frames = std::max(0, count);
+        data.clear();
+        ext_[0] = src.channels > 0 ? src.ch(0) + offset : nullptr;
+        ext_[1] = src.channels > 1 ? src.ch(1) + offset : ext_[0];
+    }
+
     void addFrom(const AudioBuffer& src, float gain = 1.f) {
         const int nch = std::min(channels, src.channels);
         const int n = std::min(frames, src.frames);
@@ -73,16 +93,20 @@ struct Param {
     float maxV = 1.f;
     float value = 0.f;
     float skew = 1.f;
-    // Audio thread reads target and writes smoothed. The message thread writes
-    // target only. smoothed is snapped from set() when no callback is running.
+    // The message thread writes target and bumps snapSeq. Only the audio thread
+    // writes smoothed, and it snaps when snapSeq changes.
     std::atomic<float> target {0.f};
+    std::atomic<uint32_t> snapSeq {0};
     float smoothed = 0.f;
+    uint32_t snapSeen = 0;
     std::vector<std::string> choices;
 
     Param() = default;
     Param(const Param& o)
         : id(o.id), name(o.name), minV(o.minV), maxV(o.maxV), value(o.value), skew(o.skew),
-          target(o.target.load(std::memory_order_relaxed)), smoothed(o.smoothed), choices(o.choices) {}
+          target(o.target.load(std::memory_order_relaxed)),
+          snapSeq(o.snapSeq.load(std::memory_order_relaxed)), smoothed(o.smoothed), snapSeen(o.snapSeen),
+          choices(o.choices) {}
     Param& operator=(const Param& o) {
         if (this != &o) {
             id = o.id;
@@ -92,14 +116,18 @@ struct Param {
             value = o.value;
             skew = o.skew;
             target.store(o.target.load(std::memory_order_relaxed), std::memory_order_relaxed);
+            snapSeq.store(o.snapSeq.load(std::memory_order_relaxed), std::memory_order_relaxed);
             smoothed = o.smoothed;
+            snapSeen = o.snapSeen;
             choices = o.choices;
         }
         return *this;
     }
     Param(Param&& o) noexcept
         : id(std::move(o.id)), name(std::move(o.name)), minV(o.minV), maxV(o.maxV), value(o.value), skew(o.skew),
-          target(o.target.load(std::memory_order_relaxed)), smoothed(o.smoothed), choices(std::move(o.choices)) {}
+          target(o.target.load(std::memory_order_relaxed)),
+          snapSeq(o.snapSeq.load(std::memory_order_relaxed)), smoothed(o.smoothed), snapSeen(o.snapSeen),
+          choices(std::move(o.choices)) {}
     Param& operator=(Param&& o) noexcept {
         if (this != &o) {
             id = std::move(o.id);
@@ -109,7 +137,9 @@ struct Param {
             value = o.value;
             skew = o.skew;
             target.store(o.target.load(std::memory_order_relaxed), std::memory_order_relaxed);
+            snapSeq.store(o.snapSeq.load(std::memory_order_relaxed), std::memory_order_relaxed);
             smoothed = o.smoothed;
+            snapSeen = o.snapSeen;
             choices = std::move(o.choices);
         }
         return *this;
@@ -181,7 +211,7 @@ public:
         if (rtGuardActive())
             rtGuardHit("param-name");
         if (const auto* p = find(pid))
-            return p->smoothed;
+            return p->value;
         return 0.f;
     }
     float get(const std::string& pid) const { return get(pid.c_str()); }
@@ -189,17 +219,21 @@ public:
         if (index < 0 || index >= static_cast<int>(params.size()))
             return 0.f;
         auto& p = params[static_cast<size_t>(index)];
+        const uint32_t seq = p.snapSeq.load(std::memory_order_acquire);
         const float t = p.target.load(std::memory_order_relaxed);
-        const float c = (p.smoothed == t) ? 1.f : 0.35f;
-        p.smoothed += (t - p.smoothed) * c;
+        if (seq != p.snapSeen) {
+            p.smoothed = t;
+            p.snapSeen = seq;
+        } else if (p.smoothed != t) {
+            p.smoothed += (t - p.smoothed) * 0.35f;
+        }
         return p.smoothed;
     }
     void set(const char* pid, float v) {
         if (auto* p = find(pid)) {
             p->value = v;
             p->target.store(v, std::memory_order_relaxed);
-            if (!rtGuardActive())
-                p->smoothed = v;
+            p->snapSeq.fetch_add(1, std::memory_order_release);
         }
     }
     void set(const std::string& pid, float v) { set(pid.c_str(), v); }
@@ -210,6 +244,11 @@ public:
     virtual void loadSample(const float*, int, int) {}
     virtual std::string pluginState() const { return {}; }
     virtual void setPluginState(const std::string&) {}
+    virtual void setTransport(double, double, bool, int64_t) {}
+    virtual bool attachEditor(void*, float) { return false; }
+    virtual void resizeEditor(int, int) {}
+    virtual void closeEditor() {}
+    virtual bool editorOpen() const { return false; }
 };
 
 struct AnalyzerSnapshot {

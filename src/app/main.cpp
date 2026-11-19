@@ -78,14 +78,19 @@ void warmMeters(ghovlz::Engine& engine) {
 
 int main(int argc, char** argv) {
     std::string shotDir;
+    std::string themeArg;
     bool window = true;
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
         if (arg == "--screenshot" && i + 1 < argc) {
             shotDir = argv[++i];
             window = false;
+        } else if (arg == "--theme" && i + 1 < argc) {
+            themeArg = argv[++i];
         } else if (arg == "--help") {
-            std::cout << "GHOVLZ DAW\n  --screenshot <dir>   write the main views and exit\n";
+            std::cout << "GHOVLZ DAW\n"
+                      << "  --screenshot <dir>          write the main views and exit\n"
+                      << "  --theme <id|file|seed>      built-in id, theme JSON, or a seed\n";
             return 0;
         }
     }
@@ -106,7 +111,22 @@ int main(int argc, char** argv) {
     }
     engine.seek(showAt);
 
+    ghovlz::ThemeProvider themes;
+    if (!themeArg.empty()) {
+        if (const ghovlz::Theme* builtin = ghovlz::Theme::findBuiltin(themeArg)) {
+            themes.set(*builtin, ghovlz::ThemeCommit::Commit);
+            std::cout << "theme builtin " << builtin->id << "\n";
+        } else if (fs::exists(themeArg)) {
+            themes.set(ghovlz::Theme::loadFile(themeArg), ghovlz::ThemeCommit::Commit);
+            std::cout << "theme file " << themes.current().id << "\n";
+        } else {
+            themes.set(ghovlz::Theme::fromSeed(themeArg), ghovlz::ThemeCommit::Commit);
+            std::cout << "theme seed " << themeArg << "\n";
+        }
+    }
+
     ghovlz::Frame frame;
+    frame.theme = &themes.current();
     frame.project = project.get();
     frame.engine = &engine;
     frame.playing = engine.playing();

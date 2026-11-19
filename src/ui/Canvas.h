@@ -54,6 +54,12 @@ public:
     virtual void blurRect(const std::string& cacheKey, Rect r, float sigma) = 0;
     virtual void drawImage(const Image& image, Rect src, Rect dst) = 0;
     virtual bool savePng(const std::string& path) = 0;
+
+    // 1 = 100%. The software canvas multiplies coordinates and the font
+    // pixel size before rasterising, so 150% and 200% are not a bitmap stretch.
+    virtual void setPaintScale(float) {}
+    virtual void innerShadow(Rect, float, Color) {}
+    virtual void markDirty(Rect) {}
 };
 
 std::unique_ptr<Canvas> makeSoftwareCanvas(int width, int height);

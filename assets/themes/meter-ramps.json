@@ -1,0 +1,260 @@
+{
+ "floorDb": -60.0,
+ "ceilDb": 6.0,
+ "profiles": [
+  {
+   "id": "ghovlz-gold",
+   "name": "GHOVLZ Gold (default)",
+   "desc": "Confirmed palette: muted gold on warm charcoal, warming to goldenrod and amber near 0 dB, red clip.",
+   "stops": [
+    [
+     -60,
+     "#5C4B1F"
+    ],
+    [
+     -30,
+     "#8C7430"
+    ],
+    [
+     -18,
+     "#B49637"
+    ],
+    [
+     -9,
+     "#C9A43A"
+    ],
+    [
+     -3,
+     "#DAA520"
+    ],
+    [
+     0,
+     "#FF821E"
+    ],
+    [
+     6,
+     "#DC2828"
+    ]
+   ],
+   "bg": "#14120E",
+   "unlit": "#221D16",
+   "gap": "#0A0A0A",
+   "hold": "#E5BD80",
+   "clip": "#DC2828",
+   "rms": "#D1BCAC",
+   "gapPx": 1,
+   "segPx": 4,
+   "minContrastLitVsBg": 2.24,
+   "clipVsBg": 3.9
+  },
+  {
+   "id": "led-classic",
+   "name": "LED Classic (mixer concept)",
+   "desc": "Green to yellow to amber to red LED ladder from 11-mixer-warm-v2; offered while the meter colour question is open.",
+   "stops": [
+    [
+     -60,
+     "#2E7D32"
+    ],
+    [
+     -24,
+     "#43A047"
+    ],
+    [
+     -12,
+     "#C0CA33"
+    ],
+    [
+     -6,
+     "#F2B134"
+    ],
+    [
+     -3,
+     "#F57C00"
+    ],
+    [
+     0,
+     "#DC2828"
+    ],
+    [
+     6,
+     "#DC2828"
+    ]
+   ],
+   "bg": "#14120E",
+   "unlit": "#1B1A15",
+   "gap": "#0A0A0A",
+   "hold": "#F5F5F5",
+   "clip": "#DC2828",
+   "rms": "#F5F5F5",
+   "gapPx": 1,
+   "segPx": 4,
+   "minContrastLitVsBg": 3.65,
+   "clipVsBg": 3.9
+  },
+  {
+   "id": "mono-gold",
+   "name": "Mono Gold",
+   "desc": "One flat muted gold for every segment; only the clip lamp and segments above 0 dB turn red. Calmest look.",
+   "stops": [
+    [
+     -60,
+     "#B49637"
+    ],
+    [
+     0,
+     "#B49637"
+    ],
+    [
+     0.01,
+     "#DC2828"
+    ],
+    [
+     6,
+     "#DC2828"
+    ]
+   ],
+   "bg": "#14120E",
+   "unlit": "#201B14",
+   "gap": "#0A0A0A",
+   "hold": "#DAA520",
+   "clip": "#DC2828",
+   "rms": "#6E5C24",
+   "gapPx": 1,
+   "segPx": 4,
+   "minContrastLitVsBg": 3.9,
+   "clipVsBg": 3.9
+  },
+  {
+   "id": "ember",
+   "name": "Ember",
+   "desc": "Heat ramp: deep oxblood through burnt orange to glowing amber; a hotter warm-brand alternative.",
+   "stops": [
+    [
+     -60,
+     "#5E2412"
+    ],
+    [
+     -36,
+     "#7A2410"
+    ],
+    [
+     -18,
+     "#A8361A"
+    ],
+    [
+     -9,
+     "#D2501E"
+    ],
+    [
+     -3,
+     "#FF821E"
+    ],
+    [
+     0,
+     "#FFB43C"
+    ],
+    [
+     6,
+     "#DC2828"
+    ]
+   ],
+   "bg": "#120D0A",
+   "unlit": "#1E1511",
+   "gap": "#070707",
+   "hold": "#FFE2B0",
+   "clip": "#DC2828",
+   "rms": "#FFB43C",
+   "gapPx": 1,
+   "segPx": 4,
+   "minContrastLitVsBg": 1.61,
+   "clipVsBg": 4.02
+  },
+  {
+   "id": "high-contrast",
+   "name": "High Contrast (accessibility)",
+   "desc": "Bone white to yellow to orange on pure black with wider gaps; white and yellow segments are 13:1 or better against black, orange and red 5.6:1 or better, red clip.",
+   "stops": [
+    [
+     -60,
+     "#F5F5F5"
+    ],
+    [
+     -18,
+     "#F5F5F5"
+    ],
+    [
+     -17.99,
+     "#FFD400"
+    ],
+    [
+     -6,
+     "#FFD400"
+    ],
+    [
+     -5.99,
+     "#FF8C00"
+    ],
+    [
+     0,
+     "#FF8C00"
+    ],
+    [
+     0.01,
+     "#FF2D2D"
+    ],
+    [
+     6,
+     "#FF2D2D"
+    ]
+   ],
+   "bg": "#000000",
+   "unlit": "#1A1A1A",
+   "gap": "#000000",
+   "hold": "#FFFFFF",
+   "clip": "#FF2D2D",
+   "rms": "#3A3A3A",
+   "gapPx": 2,
+   "segPx": 5,
+   "minContrastLitVsBg": 5.67,
+   "clipVsBg": 5.67
+  },
+  {
+   "id": "amber-glow",
+   "name": "Amber Glow (EQ preset)",
+   "desc": "The GHOVLZ-EQ factory ramp 'Amber Glow' (RampPresetStore.cpp:99-101), mapped from 0..1 onto -60..+6 dB, with the bottom stop lifted from #0A0500 so quiet signal stays visible.",
+   "stops": [
+    [
+     -60,
+     "#4A2A08"
+    ],
+    [
+     -50,
+     "#5A320A"
+    ],
+    [
+     -30.3,
+     "#A0500A"
+    ],
+    [
+     -10.5,
+     "#F0A028"
+    ],
+    [
+     6,
+     "#FFF0B4"
+    ]
+   ],
+   "bg": "#14120E",
+   "unlit": "#1C1812",
+   "gap": "#0A0A0A",
+   "hold": "#FFF0B4",
+   "clip": "#DC2828",
+   "rms": "#F0A028",
+   "gapPx": 1,
+   "segPx": 4,
+   "minContrastLitVsBg": 1.46,
+   "clipVsBg": 3.9
+  }
+ ]
+}
