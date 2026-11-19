@@ -205,13 +205,13 @@ void chainKnob(Canvas& c, float cx, float cy, float diameter, float norm, const 
     const float a0 = -kPi * 0.5f - 145.f * kPi / 180.f;
     const float a1 = -kPi * 0.5f + 145.f * kPi / 180.f;
     const float arcR = rad + rim * 0.15f;
-    const float thick = std::max(2.4f, diameter * 0.045f);
+    const float thick = std::max(1.4f, diameter * 0.012f);
     c.arc(cx, cy, arcR, a0, a1, Color::argb(0xFF3C3732), thick);
-    c.arc(cx, cy, arcR, a0, a0 + (a1 - a0) * norm, Color::argb(0xFFFF6E00), thick + 0.6f);
+    c.arc(cx, cy, arcR, a0, a0 + (a1 - a0) * norm, Color::argb(0xFFFF6E00), thick);
     const float ang = a0 + (a1 - a0) * norm;
-    const float pointer = std::max(2.f, diameter * 0.045f);
-    c.line(cx + std::cos(ang) * rad * 0.18f, cy + std::sin(ang) * rad * 0.18f,
-           cx + std::cos(ang) * rad * 0.78f, cy + std::sin(ang) * rad * 0.78f, Color::argb(0xFFD1BCAC), pointer);
+    const float pointer = std::max(1.3f, diameter * 0.012f);
+    c.line(cx + std::cos(ang) * rad * 0.34f, cy + std::sin(ang) * rad * 0.34f,
+           cx + std::cos(ang) * rad * 0.70f, cy + std::sin(ang) * rad * 0.70f, Color::argb(0xFFD1BCAC), pointer);
     if (!label.empty())
         centered(c, label, cx, cy + rad + 6.f, 18.f, dim(), false);
 }
@@ -892,102 +892,159 @@ std::string shortParam(const std::string& id) {
     return id.size() > 8 ? id.substr(0, 8) : id;
 }
 
+const Image& warmGrain() {
+    static Image image = [] {
+        Image im;
+        im.w = 64;
+        im.h = 64;
+        im.rgba.assign(static_cast<size_t>(im.w * im.h * 4), 0);
+        unsigned s = 0xC0FFEEu;
+        for (int i = 0; i < im.w * im.h; ++i) {
+            s = s * 1664525u + 1013904223u;
+            const unsigned n = (s >> 16) & 255u;
+            uint8_t r = 0, g = 0, b = 0, a = 0;
+            if (n > 228) {
+                r = 120;
+                g = 84;
+                b = 42;
+                a = 40;
+            } else if (n < 18) {
+                r = 8;
+                g = 6;
+                b = 4;
+                a = 36;
+            }
+            im.rgba[static_cast<size_t>(i) * 4] = r;
+            im.rgba[static_cast<size_t>(i) * 4 + 1] = g;
+            im.rgba[static_cast<size_t>(i) * 4 + 2] = b;
+            im.rgba[static_cast<size_t>(i) * 4 + 3] = a;
+        }
+        return im;
+    }();
+    return image;
+}
+
+void paintGrain(Canvas& c, Rect r) {
+    const Image& grain = warmGrain();
+    const Rect inner{r.x + 8.f, r.y + 8.f, std::max(1.f, r.w - 16.f), std::max(1.f, r.h - 16.f)};
+    c.clip(inner);
+    const float tw = static_cast<float>(grain.w);
+    const float th = static_cast<float>(grain.h);
+    for (float y = inner.y; y < inner.y + inner.h; y += th) {
+        for (float x = inner.x; x < inner.x + inner.w; x += tw)
+            c.drawImage(grain, {0.f, 0.f, tw, th}, {x, y, tw, th});
+    }
+    c.resetClip();
+}
+
 void chainCard(Canvas& c, Rect r) {
     c.dropShadow(r, 8.f, 10.f, Color{0, 0, 0, 160});
     c.fillRoundRect(r, 8.f, Color::argb(0xFF16120F));
+    paintGrain(c, r);
     c.innerShadow(r, 10.f, Color{0, 0, 0, 160});
     c.strokeRect(r, Color::argb(0xFF3C3732), 1.2f);
     c.line(r.x + 12.f, r.y + 1.5f, r.x + r.w - 12.f, r.y + 1.5f, Color::argb(0xFF6A5430), 1.4f);
 }
 
+void displayWell(Canvas& c, Rect r) {
+    c.fillRoundRect(r, 5.f, Color::argb(0xFF0C0A08));
+    c.innerShadow(r, 7.f, Color{0, 0, 0, 180});
+    c.strokeRect(r, Color::argb(0xFF2C261C), 1.f);
+    c.line(r.x + 8.f, r.y + 1.4f, r.x + r.w - 8.f, r.y + 1.4f, Color::argb(0xFF5A4830), 1.2f);
+}
+
+void softUnder(Canvas& c, float x, float yTop, float yBottom) {
+    const int y0 = static_cast<int>(std::ceil(yTop));
+    const int y1 = static_cast<int>(std::floor(yBottom));
+    if (y1 <= y0)
+        return;
+    const float span = static_cast<float>(y1 - y0);
+    for (int y = y0; y < y1; ++y) {
+        const float t = static_cast<float>(y - y0) / span;
+        const int alpha = 89 - static_cast<int>(t * 51.f);
+        c.fillRect({x, static_cast<float>(y), 1.f, 1.f}, Color{0xDA, 0xA5, 0x20, static_cast<uint8_t>(alpha)});
+    }
+}
+
+void glowCurve(Canvas& c, const std::vector<std::pair<float, float>>& pts, float glowW, float coreW) {
+    const Color glow{0xDA, 0xA5, 0x20, 90};
+    const Color core = Color::argb(0xFFFFB43C);
+    for (size_t i = 1; i < pts.size(); ++i)
+        c.line(pts[i - 1].first, pts[i - 1].second, pts[i].first, pts[i].second, glow, glowW);
+    for (size_t i = 1; i < pts.size(); ++i)
+        c.line(pts[i - 1].first, pts[i - 1].second, pts[i].first, pts[i].second, core, coreW);
+}
+
 void drawChainDisplay(Canvas& c, Rect r, const std::string& type) {
-    c.fillRoundRect(r, 4.f, Color::argb(0xFF100E0C));
-    c.innerShadow(r, 5.f, Color{0, 0, 0, 140});
+    displayWell(c, r);
     c.clip(r);
-    const float mid = r.y + r.h * 0.5f;
-    const Color glow{255, 140, 40, 80};
-    const Color fill{218, 165, 32, 110};
-    auto column = [&](float x, float yTop, Color color) {
-        const float y0 = std::clamp(yTop, r.y + 4.f, r.y + r.h - 6.f);
-        c.fillRect({x, y0, 1.f, r.y + r.h - 6.f - y0}, color);
-    };
+    const float mid = r.y + r.h * 0.52f;
+    const float left = r.x + 10.f;
+    const float span = std::max(8.f, r.w - 20.f);
     if (type == "eq") {
-        const int cols = std::max(8, static_cast<int>(r.w) - 20);
+        const int x0 = static_cast<int>(std::ceil(left));
+        const int x1 = static_cast<int>(std::floor(left + span));
         auto yAt = [&](float t) {
-            const float bell = std::exp(-std::pow((t - 0.55f) * 4.4f, 2.f));
-            return r.y + r.h * 0.80f - bell * r.h * 0.58f;
+            const float bell = std::exp(-std::pow((t - 0.55f) * 4.2f, 2.f));
+            const float tail = t > 0.72f ? (t - 0.72f) * r.h * 0.18f : 0.f;
+            return r.y + r.h * 0.74f - bell * r.h * 0.50f + tail;
         };
-        for (int i = 0; i < cols; ++i) {
-            const float t = static_cast<float>(i) / static_cast<float>(cols);
-            const float x = r.x + 10.f + static_cast<float>(i);
+        std::vector<std::pair<float, float>> pts;
+        pts.reserve(static_cast<size_t>(std::max(1, x1 - x0)));
+        for (int x = x0; x < x1; ++x) {
+            const float t = static_cast<float>(x - x0) / static_cast<float>(std::max(1, x1 - x0 - 1));
             const float y = yAt(t);
-            column(x, y - 3.f, glow);
-            column(x, y, fill);
+            pts.push_back({static_cast<float>(x), y});
+            softUnder(c, static_cast<float>(x), y, r.y + r.h - 8.f);
         }
-        const Color grid{90, 78, 62, 150};
+        const Color grid{40, 32, 24, 110};
         for (int i = 1; i < 4; ++i) {
             const float y = r.y + r.h * static_cast<float>(i) / 4.f;
             const float x = r.x + r.w * static_cast<float>(i) / 4.f;
             c.line(r.x + 8.f, y, r.x + r.w - 8.f, y, grid, 1.f);
             c.line(x, r.y + 8.f, x, r.y + r.h - 8.f, grid, 1.f);
         }
-        float prevX = r.x + 10.f;
-        float prevY = yAt(0.f);
-        for (int i = 1; i < cols; ++i) {
-            const float t = static_cast<float>(i) / static_cast<float>(cols);
-            const float x = r.x + 10.f + static_cast<float>(i);
-            const float y = yAt(t);
-            c.line(prevX, prevY, x, y, Color::argb(0xFFFFC56A), 2.2f);
-            prevX = x;
-            prevY = y;
-        }
-        const float nodeT[] = {0.14f, 0.55f, 0.84f};
+        glowCurve(c, pts, 4.f, 1.4f);
+        const float nodeT[] = {0.16f, 0.55f, 0.82f};
         for (float t : nodeT) {
-            const float x = r.x + 10.f + t * static_cast<float>(cols);
+            const float x = left + t * span;
             const float y = yAt(t);
-            c.fillRoundRect({x - 5.f, y - 5.f, 10.f, 10.f}, 2.f, Color::argb(0xFF1A120C));
-            c.fillRoundRect({x - 3.f, y - 3.f, 6.f, 6.f}, 1.f, Color::argb(0xFFFFE0A0));
+            c.fillEllipse(x, y, 6.f, 6.f, Color{0xFF, 0xB4, 0x3C, 80});
+            c.fillRoundRect({x - 2.5f, y - 2.5f, 5.f, 5.f}, 1.f, Color::argb(0xFFFFB43C));
         }
         c.resetClip();
         return;
     }
     if (type == "filter") {
-        const int cols = std::max(8, static_cast<int>(r.w) - 16);
+        const int x0 = static_cast<int>(std::ceil(left));
+        const int x1 = static_cast<int>(std::floor(left + span));
         auto yAt = [&](float t) {
-            const float bump = std::exp(-std::pow((t - 0.58f) * 9.f, 2.f));
-            const float fall = t < 0.48f ? 0.f : std::pow(t - 0.48f, 1.6f) * 1.7f;
-            return std::clamp(r.y + r.h * (0.22f + fall) - bump * r.h * 0.34f, r.y + 6.f, r.y + r.h - 8.f);
+            const float bump = std::exp(-std::pow((t - 0.58f) * 7.5f, 2.f));
+            const float fall = t < 0.48f ? (0.48f - t) * 0.06f : std::pow((t - 0.48f) / 0.52f, 1.25f);
+            return std::clamp(r.y + r.h * (0.38f + fall * 0.46f) - bump * r.h * 0.22f, r.y + 8.f, r.y + r.h - 10.f);
         };
-        for (int i = 0; i < cols; ++i) {
-            const float t = static_cast<float>(i) / static_cast<float>(cols);
-            const float x = r.x + 8.f + static_cast<float>(i);
-            const float y = yAt(t);
-            column(x, y - 3.f, glow);
-            column(x, y, fill);
+        std::vector<std::pair<float, float>> pts;
+        pts.reserve(static_cast<size_t>(std::max(1, x1 - x0)));
+        for (int x = x0; x < x1; ++x) {
+            const float t = static_cast<float>(x - x0) / static_cast<float>(std::max(1, x1 - x0 - 1));
+            pts.push_back({static_cast<float>(x), yAt(t)});
         }
-        float prevX = r.x + 8.f;
-        float prevY = yAt(0.f);
-        for (int i = 1; i < cols; ++i) {
-            const float t = static_cast<float>(i) / static_cast<float>(cols);
-            const float x = r.x + 8.f + static_cast<float>(i);
-            const float y = yAt(t);
-            c.line(prevX, prevY, x, y, Color::argb(0xFFFFC56A), 2.2f);
-            prevX = x;
-            prevY = y;
-        }
+        glowCurve(c, pts, 3.2f, 1.4f);
         c.resetClip();
         return;
     }
-    const int cols = std::max(8, static_cast<int>(r.w) - 16);
+    const int cols = std::max(8, static_cast<int>(span));
+    std::vector<std::pair<float, float>> pts;
+    pts.reserve(static_cast<size_t>(cols));
     for (int i = 0; i < cols; ++i) {
         const float t = static_cast<float>(i) / static_cast<float>(std::max(1, cols - 1));
-        const float lobe = std::fabs(std::sin(t * 96.f)) * (0.25f + 0.75f * std::fabs(std::sin(t * 23.f + 0.6f)));
-        const float flutter = 0.55f + 0.45f * std::fabs(std::sin(t * 7.f));
-        const float hgt = 2.f + lobe * flutter * r.h * 0.40f;
-        const float x = r.x + 8.f + static_cast<float>(i);
-        c.fillRect({x, mid - hgt - 2.f, 1.f, hgt * 2.f + 4.f}, glow);
-        c.fillRect({x, mid - hgt, 1.f, hgt * 2.f}, Color::argb(0xFFE8B15A));
+        const float sample = std::sin(t * 70.f + std::sin(t * 19.f) * 1.4f) * (0.28f + 0.72f * std::fabs(std::sin(t * 8.f)));
+        const float x = left + static_cast<float>(i);
+        const float y = mid - sample * r.h * 0.38f;
+        pts.push_back({x, y});
+        c.fillRect({x, std::min(y, mid), 1.f, std::fabs(y - mid)}, Color{0xDA, 0xA5, 0x20, 28});
     }
+    glowCurve(c, pts, 2.6f, 1.2f);
     c.resetClip();
 }
 
@@ -1006,6 +1063,7 @@ void deviceChain(Canvas& c, const Frame& f) {
     const Track* chain = f.project ? f.project->findTrack("lead") : nullptr;
     Rect box{16.f, kBarH + 12.f, w - 32.f, std::max(240.f, h - kBarH - 24.f)};
     panelBox(c, box, 10.f);
+    paintGrain(c, box);
     c.drawText(chain ? chain->name.c_str() : "Lead", box.x + 16.f, box.y + 10.f, 22.f, ink(), true);
     if (!chain)
         return;
