@@ -7,6 +7,11 @@
 #include <windows.h>
 #include <d2d1_1.h>
 #include <d2d1effects.h>
+
+// These CLSIDs are declared in d2d1effects.h and are not exported by d2d1.lib
+// in the Windows SDK used by windows-2022.
+extern "C" const GUID CLSID_D2D1GaussianBlur = {0x1feb6d69, 0x2fe6, 0x4ac9, {0x8c, 0x58, 0x1d, 0x7f, 0x93, 0xe7, 0xa6, 0xa5}};
+extern "C" const GUID CLSID_D2D1Shadow = {0xC67EA361, 0x1863, 0x4e69, {0x89, 0xDB, 0x69, 0x5D, 0x3E, 0x9A, 0x5B, 0x6B}};
 #include <d3d11.h>
 #include <dwrite.h>
 #include <dxgi1_2.h>

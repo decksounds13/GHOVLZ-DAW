@@ -23,7 +23,7 @@
 namespace ghovlz {
 namespace {
 
-AsioDrivers* drivers = nullptr;
+extern AsioDrivers* asioDrivers;
 Engine* bound = nullptr;
 ASIOBufferInfo infos[4] {};
 ASIOSampleType sampleType = ASIOSTFloat32LSB;
@@ -98,13 +98,13 @@ ASIOCallbacks callbacks {bufferSwitch, sampleRateChanged, asioMessage, bufferSwi
 
 std::string AsioBackend::open(Engine* engine, const std::string& device, int sampleRate, int frames) {
     close();
-    if (!drivers)
-        drivers = new AsioDrivers();
+    if (!asioDrivers)
+        asioDrivers = new AsioDrivers();
     char names[16][128] {};
     char* ptrs[16];
     for (int i = 0; i < 16; ++i)
         ptrs[i] = names[i];
-    const long count = drivers->getDriverNames(ptrs, 16);
+    const long count = asioDrivers->getDriverNames(ptrs, 16);
     if (count < 1)
         return "no ASIO drivers";
     std::string chosen = device.empty() ? names[0] : device;
@@ -116,13 +116,15 @@ std::string AsioBackend::open(Engine* engine, const std::string& device, int sam
         chosen = names[0];
     std::vector<char> mutableName(chosen.begin(), chosen.end());
     mutableName.push_back(0);
-    if (!drivers->loadDriver(mutableName.data()))
+    if (!asioDrivers->loadDriver(mutableName.data()))
         return "ASIO driver failed to load";
     ASIODriverInfo info {};
     info.asioVersion = 2;
     info.sysRef = GetForegroundWindow();
-    if (ASIOInit(&info) != ASE_OK)
+    if (ASIOInit(&info) != ASE_OK) {
+        ASIOExit();
         return "ASIOInit failed";
+    }
     long ins = 0, outs = 0;
     ASIOGetChannels(&ins, &outs);
     inputCount = std::min(2, static_cast<int>(ins));
@@ -178,8 +180,6 @@ void AsioBackend::close() {
     ASIOStop();
     ASIODisposeBuffers();
     ASIOExit();
-    if (drivers)
-        drivers->removeCurrentDriver();
     if (mmcss) {
         AvRevertMmThreadCharacteristics(mmcss);
         mmcss = nullptr;

@@ -196,10 +196,12 @@ if(GHOVLZ_WITH_ASIO)
         "${_ghovlz_asio}/host"
         "${_ghovlz_asio}/host/pc")
     target_sources(GhovlzDAW PRIVATE
+        "${_ghovlz_asio}/common/asio.cpp"
         "${_ghovlz_asio}/host/asiodrivers.cpp"
         "${_ghovlz_asio}/host/pc/asiolist.cpp")
     set(_ghovlz_asio_prefix "${CMAKE_SOURCE_DIR}/src/audio/asio_host_prefix.h")
     set_source_files_properties(
+        "${_ghovlz_asio}/common/asio.cpp"
         "${_ghovlz_asio}/host/asiodrivers.cpp"
         "${_ghovlz_asio}/host/pc/asiolist.cpp"
         TARGET_DIRECTORY GhovlzDAW
