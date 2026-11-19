@@ -4,7 +4,21 @@
 #include <iostream>
 #include <string>
 
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <stdlib.h>
+#endif
+
 int main(int argc, char** argv) {
+#if defined(_WIN32)
+    // A plugin that abort()s must exit the scanner. The default CRT abort
+    // report would otherwise wait on a dialog.
+    SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);
+    _set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
+#endif
     if (argc < 2) {
         std::cerr << "usage: GhovlzPluginScan <plugin.vst3>\n";
         return 2;

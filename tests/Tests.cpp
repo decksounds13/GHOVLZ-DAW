@@ -65,8 +65,14 @@ static fs::path findUp(const std::string& name) {
         if (fs::exists(dir)) {
             for (auto it = fs::recursive_directory_iterator(dir, fs::directory_options::skip_permission_denied);
                  it != fs::recursive_directory_iterator(); ++it) {
-                if (it->path().filename() == name)
-                    return it->path();
+                const fs::path file = it->path();
+                if (file.filename() == name)
+                    return file;
+#if defined(_WIN32)
+                // CMake appends .exe. The lookup name stays the target name.
+                if (fs::is_regular_file(file) && file.filename() == name + ".exe")
+                    return file;
+#endif
                 if (it.depth() > 3) it.disable_recursion_pending();
             }
         }
