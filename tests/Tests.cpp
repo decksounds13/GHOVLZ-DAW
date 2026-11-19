@@ -240,6 +240,7 @@ TEST_CASE("vst3 scan blacklist and gain") {
     host.setBlacklistFile(black.string());
     std::string err;
     REQUIRE(host.scan(gain.string(), err));
+    INFO(host.lastName());
     REQUIRE(host.lastName().find("Gain") != std::string::npos);
     REQUIRE_FALSE(host.scan(crash.string(), err));
     REQUIRE(host.isBlacklisted(crash.string()));

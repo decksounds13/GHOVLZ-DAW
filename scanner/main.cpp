@@ -34,7 +34,7 @@ int main(int argc, char** argv) {
         if (ci.category() != kVstAudioEffectClass)
             continue;
         any = true;
-        std::cout << "NAME\t" << ci.name() << "\n";
+        std::cout << "NAME\t" << ci.name() << std::endl;
         // Instantiating is what surfaces a plugin that aborts in its factory.
         auto component = module->getFactory().createInstance<Steinberg::Vst::IComponent>(ci.ID());
         if (!component) {

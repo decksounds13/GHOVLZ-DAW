@@ -106,19 +106,39 @@ int runProcess(const std::string& exe, const std::string& arg, std::string& outp
     }
     const auto started = std::chrono::steady_clock::now();
     char buf[512];
-    DWORD n = 0;
-    while (true) {
-        DWORD avail = 0;
-        if (PeekNamedPipe(readPipe, nullptr, 0, nullptr, &avail, nullptr) && avail > 0 &&
-            ReadFile(readPipe, buf, sizeof(buf), &n, nullptr) && n > 0)
+    auto drain = [&] {
+        // A fast scanner can exit between the peek and the wait. Read whatever
+        // is left after the process handle is signaled, or the NAME line is lost.
+        while (true) {
+            DWORD avail = 0;
+            DWORD n = 0;
+            if (!PeekNamedPipe(readPipe, nullptr, 0, nullptr, &avail, nullptr) || avail == 0)
+                break;
+            if (!ReadFile(readPipe, buf, sizeof(buf), &n, nullptr) || n == 0)
+                break;
             output.append(buf, buf + n);
+        }
+    };
+    bool finished = false;
+    while (!finished) {
+        drain();
         const DWORD wait = WaitForSingleObject(pi.hProcess, 50);
         if (wait == WAIT_OBJECT_0)
-            break;
-        if (std::chrono::steady_clock::now() - started > std::chrono::seconds(20)) {
+            finished = true;
+        else if (std::chrono::steady_clock::now() - started > std::chrono::seconds(20)) {
             TerminateProcess(pi.hProcess, 1);
-            break;
+            WaitForSingleObject(pi.hProcess, 2000);
+            finished = true;
         }
+    }
+    // The last flush can become readable just after the process handle is signaled.
+    for (int i = 0; i < 5; ++i) {
+        const auto before = output.size();
+        drain();
+        if (output.size() != before)
+            i = 0;
+        else
+            Sleep(10);
     }
     DWORD code = 1;
     GetExitCodeProcess(pi.hProcess, &code);
