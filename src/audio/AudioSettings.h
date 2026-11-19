@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <string>
 #include <vector>
 
@@ -23,7 +24,7 @@ public:
     void pump(const float* input);
     void noteStopped();
     bool recover();
-    bool needsReopen() const { return needsReopen_; }
+    bool needsReopen() const { return needsReopen_.load(std::memory_order_acquire); }
     int sampleRate() const { return settings_.sampleRate; }
     int frames() const { return settings_.frames; }
     const std::string& backendName() const { return settings_.backend; }
@@ -32,7 +33,7 @@ private:
     Engine* engine_ = nullptr;
     AudioSettings settings_;
     std::vector<float> output_;
-    bool needsReopen_ = false;
+    std::atomic<bool> needsReopen_ {false};
 };
 
 } // namespace ghovlz

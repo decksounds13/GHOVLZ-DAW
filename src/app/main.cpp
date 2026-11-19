@@ -6,6 +6,7 @@
 #include "model/Project.h"
 #include "ui/Canvas.h"
 #include "ui/Paint.h"
+#include "ui/Renderer.h"
 
 #include <chrono>
 #include <filesystem>
@@ -78,14 +79,27 @@ void warmMeters(ghovlz::Engine& engine) {
 
 int main(int argc, char** argv) {
     std::string shotDir;
+    std::string themeArg;
+    bool forceWarp = false;
+    bool deviceLost = false;
     bool window = true;
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
         if (arg == "--screenshot" && i + 1 < argc) {
             shotDir = argv[++i];
             window = false;
+        } else if (arg == "--theme" && i + 1 < argc) {
+            themeArg = argv[++i];
+        } else if (arg == "--force-warp") {
+            forceWarp = true;
+        } else if (arg == "--simulate-device-lost") {
+            deviceLost = true;
         } else if (arg == "--help") {
-            std::cout << "GHOVLZ DAW\n  --screenshot <dir>   write the main views and exit\n";
+            std::cout << "GHOVLZ DAW\n"
+                      << "  --screenshot <dir>          write the main views and exit\n"
+                      << "  --theme <id|file|seed>      built-in id, theme JSON, or a seed\n"
+                      << "  --force-warp                render screenshots through WARP when it is available\n"
+                      << "  --simulate-device-lost      recreate the renderer and record the elapsed time\n";
             return 0;
         }
     }
@@ -106,7 +120,22 @@ int main(int argc, char** argv) {
     }
     engine.seek(showAt);
 
+    ghovlz::ThemeProvider themes;
+    if (!themeArg.empty()) {
+        if (const ghovlz::Theme* builtin = ghovlz::Theme::findBuiltin(themeArg)) {
+            themes.set(*builtin, ghovlz::ThemeCommit::Commit);
+            std::cout << "theme builtin " << builtin->id << "\n";
+        } else if (fs::exists(themeArg)) {
+            themes.set(ghovlz::Theme::loadFile(themeArg), ghovlz::ThemeCommit::Commit);
+            std::cout << "theme file " << themes.current().id << "\n";
+        } else {
+            themes.set(ghovlz::Theme::fromSeed(themeArg), ghovlz::ThemeCommit::Commit);
+            std::cout << "theme seed " << themeArg << "\n";
+        }
+    }
+
     ghovlz::Frame frame;
+    frame.theme = &themes.current();
     frame.project = project.get();
     frame.engine = &engine;
     frame.playing = engine.playing();
@@ -128,37 +157,73 @@ int main(int argc, char** argv) {
     if (!shotDir.empty()) {
         std::error_code ec;
         fs::create_directories(shotDir, ec);
-        auto canvas = ghovlz::makeSoftwareCanvas(1680, 980);
+        ghovlz::RendererDesc desc;
+        desc.width = 1680;
+        desc.height = 980;
+        desc.preference = forceWarp ? ghovlz::RendererPreference::Warp : ghovlz::RendererPreference::Auto;
+        auto canvas = ghovlz::openRenderer(desc);
+        if (!canvas) {
+            std::cerr << "renderer failed to open\n";
+            return 1;
+        }
+        frame.backend = canvas->backendName();
+        if (forceWarp && std::string(frame.backend) != "WARP") {
+            std::cerr << "force-warp opened " << frame.backend << "\n";
+            return 1;
+        }
         const ghovlz::View views[] = {ghovlz::View::Arrangement, ghovlz::View::Session, ghovlz::View::Perform,
                                       ghovlz::View::Mixer, ghovlz::View::Device, ghovlz::View::Piano,
-                                      ghovlz::View::Browser, ghovlz::View::Plugin};
+                                      ghovlz::View::Browser, ghovlz::View::Plugin, ghovlz::View::Prefs};
         const char* names[] = {"arrangement.png", "session.png", "perform.png", "mixer.png",
-                               "device-chain.png", "piano-roll.png", "browser.png", "plugin.png"};
-        for (int i = 0; i < 8; ++i) {
+                               "device-chain.png", "piano-roll.png", "browser.png", "plugin.png", "theme.png"};
+        auto paint = [&] {
+            canvas->begin();
+            ghovlz::paintFrame(*canvas, frame);
+            canvas->end();
+        };
+        for (int i = 0; i < 9; ++i) {
             frame.view = views[i];
             frame.playhead = engine.playhead();
-            ghovlz::paintFrame(*canvas, frame);
+            paint();
             const fs::path out = fs::path(shotDir) / names[i];
-            if (!canvas->savePng(out.string()))
+            if (!canvas->savePng(out.string())) {
                 std::cerr << "failed to write " << out << "\n";
-            else
-                std::cout << "wrote " << out << "\n";
+                return 1;
+            }
+            std::cout << "wrote " << out << "\n";
         }
         frame.view = ghovlz::View::Arrangement;
         const auto t0 = std::chrono::steady_clock::now();
         for (int i = 0; i < 30; ++i)
-            ghovlz::paintFrame(*canvas, frame);
+            paint();
         const auto t1 = std::chrono::steady_clock::now();
         const double cold = std::chrono::duration<double, std::milli>(t1 - t0).count() / 30.0;
         const auto t2 = std::chrono::steady_clock::now();
         for (int i = 0; i < 200; ++i)
-            ghovlz::paintFrame(*canvas, frame);
+            paint();
         const auto t3 = std::chrono::steady_clock::now();
         const double warm = std::chrono::duration<double, std::milli>(t3 - t2).count() / 200.0;
         std::ofstream bench(fs::path(shotDir) / "frame-times.txt");
-        bench << "software canvas arrangement frames\n";
+        bench << "backend " << frame.backend << "\n";
         bench << "first 30 ms " << cold << "\n";
         bench << "next 200 ms " << warm << "\n";
+        if (forceWarp)
+            bench << "force-warp requested\n";
+        if (deviceLost) {
+            const auto lost0 = std::chrono::steady_clock::now();
+            canvas = ghovlz::openRenderer(desc);
+            if (!canvas)
+                return 1;
+            frame.backend = canvas->backendName();
+            paint();
+            const auto lost1 = std::chrono::steady_clock::now();
+            const double lostMs = std::chrono::duration<double, std::milli>(lost1 - lost0).count();
+            bench << "device-lost ms " << lostMs << "\n";
+            bench << "device-lost backend " << frame.backend << "\n";
+            std::cout << "device-lost ms " << lostMs << "\n";
+            if (lostMs >= 1000.0)
+                return 1;
+        }
         std::cout << "frame ms cold " << cold << " warm " << warm << "\n";
         return 0;
     }
@@ -169,5 +234,7 @@ int main(int argc, char** argv) {
     host.engine = &engine;
     host.project = project;
     host.frame = frame;
+    host.themes = &themes;
+    host.frame.widgets = &host.widgets;
     return ghovlz::runWindow(host);
 }

@@ -127,7 +127,14 @@ public:
         }
     }
 
+    void setPaintScale(float scale) override { paintScale_ = scale < 0.25f ? 1.f : scale; }
+
     void fillRect(Rect r, Color color) override {
+        if (enterScale(r)) {
+            fillRect(r, color);
+            scaling_ = false;
+            return;
+        }
         int x0 = std::max(0, static_cast<int>(std::floor(r.x)));
         int y0 = std::max(0, static_cast<int>(std::floor(r.y)));
         int x1 = std::min(w_, static_cast<int>(std::ceil(r.x + r.w)));
@@ -139,6 +146,11 @@ public:
     }
 
     void strokeRect(Rect r, Color color, float thickness) override {
+        if (enterScale(r, &thickness)) {
+            strokeRect(r, color, thickness);
+            scaling_ = false;
+            return;
+        }
         fillRect({r.x, r.y, r.w, thickness}, color);
         fillRect({r.x, r.y + r.h - thickness, r.w, thickness}, color);
         fillRect({r.x, r.y, thickness, r.h}, color);
@@ -146,6 +158,11 @@ public:
     }
 
     void fillRoundRect(Rect r, float radius, Color color) override {
+        if (enterScale(r, &radius)) {
+            fillRoundRect(r, radius, color);
+            scaling_ = false;
+            return;
+        }
         const float rad = std::min(radius, std::min(r.w, r.h) * 0.5f);
         int x0 = std::max(0, static_cast<int>(std::floor(r.x)));
         int y0 = std::max(0, static_cast<int>(std::floor(r.y)));
@@ -161,6 +178,12 @@ public:
     }
 
     void fillEllipse(float cx, float cy, float rx, float ry, Color color) override {
+        if (!scaling_ && paintScale_ != 1.f) {
+            scaling_ = true;
+            fillEllipse(cx * paintScale_, cy * paintScale_, rx * paintScale_, ry * paintScale_, color);
+            scaling_ = false;
+            return;
+        }
         if (rx <= 0.f || ry <= 0.f)
             return;
         int x0 = std::max(0, static_cast<int>(std::floor(cx - rx)));
@@ -178,6 +201,12 @@ public:
     }
 
     void line(float x0, float y0, float x1, float y1, Color color, float thickness) override {
+        if (!scaling_ && paintScale_ != 1.f) {
+            scaling_ = true;
+            line(x0 * paintScale_, y0 * paintScale_, x1 * paintScale_, y1 * paintScale_, color, thickness * paintScale_);
+            scaling_ = false;
+            return;
+        }
         const float dx = x1 - x0;
         const float dy = y1 - y0;
         const int steps = std::max(1, static_cast<int>(std::ceil(std::max(std::abs(dx), std::abs(dy)))));
@@ -203,10 +232,24 @@ public:
         }
     }
 
-    void clip(Rect r) override { clip_ = r; clipped_ = true; }
+    void clip(Rect r) override {
+        if (enterScale(r)) {
+            clip(r);
+            scaling_ = false;
+            return;
+        }
+        clip_ = r;
+        clipped_ = true;
+    }
     void resetClip() override { clipped_ = false; }
 
     void drawText(const std::string& text, float x, float y, float size, Color color, bool bold) override {
+        if (!scaling_ && paintScale_ != 1.f) {
+            scaling_ = true;
+            drawText(text, x * paintScale_, y * paintScale_, size * paintScale_, color, bold);
+            scaling_ = false;
+            return;
+        }
         const FontFile& font = (size >= 22.f && wordmark_.ok) ? wordmark_ : (bold ? bold_ : regular_);
         if (!font.ok) {
             fillRect({x, y, text.size() * size * 0.5f, size}, color.withAlpha(40));
@@ -252,6 +295,38 @@ public:
             w += ax * scale;
         }
         return w;
+    }
+
+    void innerShadow(Rect r, float depth, Color color) override {
+        if (enterScale(r, &depth)) {
+            innerShadow(r, depth, color);
+            scaling_ = false;
+            return;
+        }
+        if (depth < 1.f || r.w < 2.f || r.h < 2.f)
+            return;
+        const float rad = std::min(depth, std::min(r.w, r.h) * 0.5f);
+        int x0 = std::max(0, static_cast<int>(std::floor(r.x)));
+        int y0 = std::max(0, static_cast<int>(std::floor(r.y)));
+        int x1 = std::min(w_, static_cast<int>(std::ceil(r.x + r.w)));
+        int y1 = std::min(h_, static_cast<int>(std::ceil(r.y + r.h)));
+        for (int y = y0; y < y1; ++y) {
+            for (int x = x0; x < x1; ++x) {
+                const float px = x + 0.5f;
+                const float py = y + 0.5f;
+                if (!insideClip(x, y) || !inRound(px, py, r, rad))
+                    continue;
+                const float dx = std::min(px - r.x, r.x + r.w - px);
+                const float dy = std::min(py - r.y, r.y + r.h - py);
+                const float edge = std::min(dx, dy);
+                if (edge >= depth)
+                    continue;
+                const float t = 1.f - edge / depth;
+                Color c = color;
+                c.a = static_cast<uint8_t>(std::clamp(color.a * t * t, 0.f, 255.f));
+                blend(x, y, c);
+            }
+        }
     }
 
     void dropShadow(Rect r, float radius, float blur, Color color) override {
@@ -361,6 +436,19 @@ private:
         }
     };
 
+    bool enterScale(Rect& r, float* extra = nullptr) {
+        if (scaling_ || paintScale_ == 1.f)
+            return false;
+        scaling_ = true;
+        r.x *= paintScale_;
+        r.y *= paintScale_;
+        r.w *= paintScale_;
+        r.h *= paintScale_;
+        if (extra)
+            *extra *= paintScale_;
+        return true;
+    }
+
     bool insideClip(int x, int y) const {
         if (x < 0 || y < 0 || x >= w_ || y >= h_)
             return false;
@@ -423,6 +511,8 @@ private:
     }
 
     int w_, h_;
+    float paintScale_ = 1.f;
+    bool scaling_ = false;
     std::vector<uint8_t> px_;
     FontFile regular_, bold_, wordmark_;
     std::map<GKey, Glyph> glyphs_;

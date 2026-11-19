@@ -16,6 +16,7 @@
 #include "engine/Engine.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -37,6 +38,7 @@ int outputCount = 0;
 std::vector<float> interleavedIn;
 std::vector<float> interleavedOut;
 HANDLE mmcss = nullptr;
+std::atomic<bool> asioReset {false};
 
 float readSample(const void* buffer, int index) {
     if (sampleType == ASIOSTFloat32LSB)
@@ -89,10 +91,15 @@ ASIOTime* bufferSwitchTimeInfo(ASIOTime*, long index, ASIOBool direct) {
 void sampleRateChanged(ASIOSampleRate) {}
 
 long asioMessage(long selector, long, void*, double*) {
+    if (selector == kAsioSelectorSupported || selector == kAsioSupportsTimeInfo)
+        return 1;
     if (selector == kAsioEngineVersion)
         return 2;
-    if (selector == kAsioSupportsTimeInfo)
+    if (selector == kAsioResetRequest || selector == kAsioBufferSizeChange || selector == kAsioResyncRequest ||
+        selector == kAsioLatenciesChanged) {
+        asioReset.store(true, std::memory_order_release);
         return 1;
+    }
     return 0;
 }
 

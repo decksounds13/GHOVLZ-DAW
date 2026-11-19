@@ -45,12 +45,12 @@ A source gate rejects the old framework's type names, module headers, Projucer f
 ### UI
 
 1. Draw into `Canvas`. The same `paintFrame` runs on Direct2D and on the software canvas.
-2. Windows creates a hardware D3D11 device with `D3D11_CREATE_DEVICE_BGRA_SUPPORT`, feature levels 11.1 and 11.0. If that fails it creates a WARP device. The swap chain is `DXGI_SWAP_EFFECT_FLIP_DISCARD`, two buffers, `DXGI_FORMAT_B8G8R8A8_UNORM`. The Direct2D context targets the swap-chain surface.
+2. `openRenderer` is the only way the window and the screenshot path create a canvas. On Windows, `Auto` creates a hardware D3D11 device with `D3D11_CREATE_DEVICE_BGRA_SUPPORT`, feature levels 11.1 and 11.0, then a WARP device, then the software canvas. `Warp` skips the hardware device and does not fall through to software. A window gets a flip-model swap chain (`DXGI_SWAP_EFFECT_FLIP_DISCARD`, two buffers, `DXGI_FORMAT_B8G8R8A8_UNORM`). A null window renders to an offscreen Direct2D bitmap. `savePng` copies that target into a CPU-read bitmap. Linux always gets the software canvas.
 3. `Present` returning `DXGI_ERROR_DEVICE_REMOVED` or `DXGI_ERROR_DEVICE_RESET`, or `EndDraw` returning `D2DERR_RECREATE_TARGET`, drops the device and builds it again. Shadow and blur caches are cleared with the device.
 4. Per-monitor DPI v2 is requested with `SetProcessDpiAwarenessContext` (awareness context `-4`) and applied again on `WM_DPICHANGED`.
 5. The top-bar badge is the canvas backend name: `D3D11`, `WARP`, or `CPU`. It is not a generic "GPU" label.
 6. Shadows: on Direct2D, draw the shape into a compatible render target and run `CLSID_D2D1Shadow`. Cache the effect by width, height, blur, and corner radius. On the software canvas, rasterize a rounded mask and box-blur it, with the same cache key. Blurs use `CLSID_D2D1GaussianBlur` or a cached box blur, keyed by the caller so a static panel is not rebuilt every frame.
-7. Knobs: 100-frame DarkKnob filmstrip (`assets/DarkKnob4_Stitched.png`, 220 px frames). Frame index is the normalized, skewed parameter, not a linear frequency. The arc runs from -145° to +145° around up, in `#FF6E00`, with a bone pointer `#D1BCAC`.
+7. Knobs: 100-frame DarkKnob filmstrip (`assets/DarkKnob4_Stitched.png`, 220 px frames) on the mixer and the generic knob. Frame index is the normalized, skewed parameter, not a linear frequency. The arc runs from -145° to +145° around up, in `#FF6E00`, with a bone pointer `#D1BCAC`. Device-chain knobs are drawn to the same colors (`#231F20` disc, `#D1BCAC` pointer, `#FF6E00` arc) at about 40% of the card width, because a fixed 48 px disc does not fill the card.
 8. Palette for chrome: near-black `#0A0A0A`, warm brown `#3C3732`, antique gold `#B49637`, goldenrod `#DAA520`, amber `#FF821E`. EQ band colors from the identity sheet belong on the EQ graph only.
 
 ### Parameters and state
@@ -67,7 +67,7 @@ Windows audio is WASAPI through miniaudio, shared or exclusive, with the Pro Aud
 
 ### Message loop
 
-`runWindow` is Win32 on Windows and X11 on Linux. Keys 1–8 switch views. Space toggles play. The audio callback does not paint. `--screenshot <dir>` paints every view on the software canvas and exits, which is how Linux CI and this VM produce PNGs without a GPU.
+`runWindow` is Win32 on Windows and X11 on Linux. The Windows loop opens the canvas through `openRenderer` and calls `begin` / `end` around `paintFrame`, so Direct2D actually draws and presents. Keys 1–8 switch views. Space toggles play. The audio callback does not paint. `--screenshot <dir>` uses the same renderer. `--force-warp` requires the backend name `WARP` and reads the PNG back from the Direct2D target. Linux CI and this VM still write the software canvas, because Direct2D is Windows-only.
 
 ## 3. What was easy, what was hard, how sound was checked
 
@@ -110,7 +110,7 @@ A VST3 plugin in this tree is a `MODULE` from `smtg_add_vst3plugin`, linked to `
 
 Still required for a real product plugin, and not built here:
 
-- A `IPlugView` editor. The test gain plugin has no view. The DAW draws a generic knob page from the parameter list. A ported EQ editor would implement `IPlugView` on top of `Canvas`, or draw into a child HWND with Direct2D.
+- `IPlugView` embed (HOST-07). The test gain plugin creates a native child of the parent it is given: an `HWND` (`WS_CHILD`) on Windows, an X11 window on Linux. `attached` paints the view into that child. `onSize` resizes it and paints again. On Windows, `WM_PAINT` and `WM_PRINTCLIENT` draw the same charcoal field and gold bar, so a later erase does not wipe the picture. `removed` destroys the child. The view implements `IPlugViewContentScaleSupport`: `setContentScaleFactor` scales the unscaled size and asks the host frame to `resizeView`, which calls `onSize`. The host frame also implements Linux `IRunLoop` (timers and file descriptors). `pumpEditorRunLoop()` delivers them, and the window loop calls it every frame. A ported EQ editor would paint its own controls into the same child.
 - CMake install/signing, and a decision about the VST3 SDK license on anything shipped outside the company.
 - CLAP, if that format is required: an entry point, parameters, and state. `ClapHost` on the host side is still a stub.
 - A factory UID, bus layout, and `setBusArrangements` that match what the host activates. The gain plugin uses `SingleComponentEffect` and stereo buses.
@@ -133,7 +133,11 @@ Still required for a real product plugin, and not built here:
 
 Do not put the VST3 SDK inside `ghovlz-core` public headers if a plugin and the host would both export SDK symbols. The host links the SDK. A plugin links the SDK on its own target, which is what `GhovlzTestGain` does.
 
-## 6. Other GHOVLZ apps
+## 6. Device-chain EQ card
+
+The EQ card on the device-chain view is a drawing: a compact curve and three band nodes, so the chain matches the warm concept. It does not process audio. The EQ DSP and editor port stays a separate piece of work (the gap plan's EQ port, not this view).
+
+## 7. Other GHOVLZ apps
 
 Scope is the amount of code that has to move, not a calendar estimate.
 
@@ -148,7 +152,7 @@ Scope is the amount of code that has to move, not a calendar estimate.
 
 ## Direct2D, shadows, and frame time
 
-The Windows renderer is Direct2D because that backend was the one that made the other GHOVLZ apps responsive. This VM has no D3D11 device, so Direct2D was not executed here. Windows CI compiles `Direct2DCanvas.cpp`. Linux runs `SoftwareCanvas`.
+The Windows renderer is Direct2D because that backend was the one that made the other GHOVLZ apps responsive. `openRenderer` picks hardware D3D11, then WARP, then the software canvas. This VM has no D3D11 device, so Direct2D was not executed here. Windows CI compiles `Direct2DCanvas.cpp`, and `--force-warp --screenshot` reads the WARP frame back to PNG. Linux runs `SoftwareCanvas`.
 
 Measured on the software canvas, arrangement view, 1680×980, in the screenshot pass that wrote `docs/screenshots/`:
 

@@ -105,7 +105,7 @@ The executable is:
 build/bin/RELEASE/GHOVLZ DAW
 ```
 
-Screenshots of every main view:
+Screenshots of every main view. Linux writes the software canvas. On Windows the same flag goes through `openRenderer`: hardware D3D11, then WARP, then software. `--force-warp` skips the hardware device and fails if the backend is not `WARP`. The PNG is read back from the Direct2D target.
 
 ```bash
 "./build/bin/RELEASE/GHOVLZ DAW" --screenshot docs/screenshots

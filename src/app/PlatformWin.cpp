@@ -4,6 +4,7 @@
 #include "midi/MidiIO.h"
 #include "ui/Canvas.h"
 #include "ui/Direct2DCanvas.h"
+#include "ui/Renderer.h"
 
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -39,7 +40,9 @@ void paint(WinState& state) {
     state.host->frame.backend = state.canvas->backendName();
     state.host->frame.audioBackend = state.audio.backendName();
     state.host->frame.midiPort = state.midi.portName();
+    state.canvas->begin();
     paintFrame(*state.canvas, state.host->frame);
+    state.canvas->end();
     if (!state.direct2d) {
         const uint8_t* rgba = softwarePixels(*state.canvas);
         if (!rgba)
@@ -68,8 +71,27 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     auto* state = reinterpret_cast<WinState*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
     switch (msg) {
         case WM_LBUTTONDOWN:
+        case WM_LBUTTONUP:
+        case WM_MOUSEMOVE:
             if (state && state->host) {
-                const Hit hit = hitTest(static_cast<float>(LOWORD(lp)), static_cast<float>(HIWORD(lp)), state->width, state->height);
+                PointerEvent pointer;
+                pointer.phase = msg == WM_LBUTTONDOWN ? PointerEvent::Phase::Down
+                                : msg == WM_LBUTTONUP ? PointerEvent::Phase::Up
+                                                      : PointerEvent::Phase::Move;
+                pointer.x = static_cast<float>(static_cast<short>(LOWORD(lp)));
+                pointer.y = static_cast<float>(static_cast<short>(HIWORD(lp)));
+                pointer.fine = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+                if (uiPointer(state->host->frame, state->host->project.get(), state->host->engine, state->host->project,
+                              state->host->themes, pointer)) {
+                    if (msg == WM_LBUTTONDOWN)
+                        SetCapture(hwnd);
+                    if (msg == WM_LBUTTONUP)
+                        ReleaseCapture();
+                    return 0;
+                }
+                if (msg != WM_LBUTTONDOWN)
+                    return 0;
+                const Hit hit = hitTest(pointer.x, pointer.y, state->width, state->height, 1.f, state->host->frame.view);
                 if (hit == Hit::Play) {
                     if (state->host->engine->playing())
                         state->host->engine->stop();
@@ -91,8 +113,20 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 }
             }
             return 0;
+        case WM_CHAR:
+            if (state && state->host && wp >= 32) {
+                if (uiKey(state->host->frame, state->host->project.get(), state->host->engine, state->host->project, state->host->themes,
+                          KeyEvent{static_cast<uint32_t>(wp), false}))
+                    return 0;
+            }
+            return 0;
         case WM_KEYDOWN:
             if (state && state->host) {
+                if (wp == VK_BACK) {
+                    if (uiKey(state->host->frame, state->host->project.get(), state->host->engine, state->host->project, state->host->themes,
+                              KeyEvent{0, true}))
+                        return 0;
+                }
                 if (wp == VK_ESCAPE)
                     state->quit = true;
                 else if (wp == VK_SPACE) {
@@ -102,6 +136,12 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                         state->host->engine->play();
                 } else if (wp >= '1' && wp <= '8') {
                     state->host->frame.view = static_cast<View>(wp - '1');
+                } else if ((wp == 'Z' || wp == 'Y') && (GetKeyState(VK_CONTROL) & 0x8000) && state->host->project) {
+                    if (wp == 'Y' || (GetKeyState(VK_SHIFT) & 0x8000))
+                        state->host->undo.redo(*state->host->project);
+                    else
+                        state->host->undo.undo(*state->host->project);
+                    state->host->engine->setProject(state->host->project);
                 }
             }
             return 0;
@@ -151,8 +191,13 @@ int runWindow(AppHost& host) {
     SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(&state));
     ShowWindow(hwnd, SW_SHOW);
 
-    state.canvas = makeDirect2DCanvas(hwnd, state.width, state.height);
-    state.direct2d = static_cast<bool>(state.canvas);
+    RendererDesc desc;
+    desc.window = hwnd;
+    desc.width = state.width;
+    desc.height = state.height;
+    desc.preference = RendererPreference::Auto;
+    state.canvas = openRenderer(desc);
+    state.direct2d = state.canvas && std::string(state.canvas->backendName()) != "CPU";
     if (!state.canvas)
         state.canvas = makeSoftwareCanvas(state.width, state.height);
     if (state.audio.open(host.engine, 48000))
@@ -168,6 +213,8 @@ int runWindow(AppHost& host) {
             DispatchMessageW(&msg);
         }
         state.midi.poll();
+        if (state.host->engine)
+            state.host->engine->pumpEditors();
         paint(state);
         Sleep(16);
     }

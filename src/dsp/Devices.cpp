@@ -1147,8 +1147,7 @@ public:
                     spec[static_cast<size_t>(n)] = acc[static_cast<size_t>(n)] * w;
                 }
                 fftRadix2(spec, false);
-                const int slot = (published.load(std::memory_order_relaxed) + 1) % 3;
-                AnalyzerSnapshot& next = slots[slot];
+                AnalyzerSnapshot& next = slots[writerSlot];
                 for (int b = 0; b < 256; ++b) {
                     const float f0 = 20.f * std::pow(1000.f, b / 256.f);
                     const float f1 = 20.f * std::pow(1000.f, (b + 1) / 256.f);
@@ -1170,13 +1169,19 @@ public:
                 ms /= std::max(1, momentFill);
                 next.momentaryLufs = -0.691f + 10.f * std::log10(static_cast<float>(std::max(1e-12, ms)));
                 next.peakDb = gainToDb(peak);
-                published.store(slot, std::memory_order_release);
+                // The writer fills writerSlot, then exchanges it with the idle slot.
+                // The reader exchanges the published slot out before copying it, so
+                // the two sides never touch the same slot.
+                writerSlot = idle.exchange(writerSlot, std::memory_order_acq_rel);
                 accCount = 0;
             }
         }
     }
     AnalyzerSnapshot copy() const {
-        return slots[published.load(std::memory_order_acquire)];
+        const int got = idle.exchange(readerSlot, std::memory_order_acq_rel);
+        AnalyzerSnapshot out = slots[got];
+        readerSlot = got;
+        return out;
     }
     double sampleRate = 48000;
     std::vector<float> acc;
@@ -1188,7 +1193,9 @@ public:
     int scopePos = 0;
     Biquad k1, k2;
     AnalyzerSnapshot slots[3];
-    std::atomic<int> published {0};
+    int writerSlot = 2;
+    mutable int readerSlot = 0;
+    mutable std::atomic<int> idle {1};
 };
 
 class Missing : public Device {

@@ -107,9 +107,14 @@ add_library(ghovlz_core STATIC
     src/dsp/Devices.cpp
     src/io/WavFile.cpp
     src/model/Project.cpp
+    src/model/Undo.cpp
+    src/model/Edit.cpp
+    src/io/DiskWriter.cpp
     src/engine/Engine.cpp
+    src/ui/Theme.cpp
     src/host/PluginHost.cpp
-    src/audio/FakeBackend.cpp)
+    src/audio/FakeBackend.cpp
+    src/audio/AppSettings.cpp)
 target_include_directories(ghovlz_core PUBLIC "${CMAKE_SOURCE_DIR}/src")
 target_link_libraries(ghovlz_core PUBLIC nlohmann_json::nlohmann_json ${GHOVLZ_VST3_LIBS})
 if(UNIX AND NOT APPLE)
@@ -125,8 +130,18 @@ else()
 endif()
 smtg_add_vst3plugin(GhovlzTestGain PACKAGE_NAME "GHOVLZ Test Gain" SOURCES_LIST plugins/Gain.cpp "${GHOVLZ_VST3_MAIN}")
 target_link_libraries(GhovlzTestGain PRIVATE sdk sdk_common base pluginterfaces)
+if(UNIX AND NOT APPLE)
+    target_link_libraries(GhovlzTestGain PRIVATE X11)
+endif()
+if(WIN32)
+    target_link_libraries(GhovlzTestGain PRIVATE user32 gdi32)
+endif()
 smtg_add_vst3plugin(GhovlzCrash PACKAGE_NAME "GHOVLZ Crash" SOURCES_LIST plugins/Crash.cpp "${GHOVLZ_VST3_MAIN}")
 target_link_libraries(GhovlzCrash PRIVATE sdk sdk_common base pluginterfaces)
+smtg_add_vst3plugin(GhovlzTestSynth PACKAGE_NAME "GHOVLZ Test Synth" SOURCES_LIST plugins/TestSynth.cpp "${GHOVLZ_VST3_MAIN}")
+target_link_libraries(GhovlzTestSynth PRIVATE sdk sdk_common base pluginterfaces)
+smtg_add_vst3plugin(GhovlzHang PACKAGE_NAME "GHOVLZ Hang" SOURCES_LIST plugins/Hang.cpp "${GHOVLZ_VST3_MAIN}")
+target_link_libraries(GhovlzHang PRIVATE sdk sdk_common base pluginterfaces)
 
 add_executable(GhovlzPluginScan scanner/main.cpp)
 target_link_libraries(GhovlzPluginScan PRIVATE ${GHOVLZ_VST3_LIBS})
@@ -134,9 +149,35 @@ if(UNIX AND NOT APPLE)
     target_link_libraries(GhovlzPluginScan PRIVATE pthread dl)
 endif()
 
-add_executable(GhovlzTests tests/Tests.cpp)
+option(GHOVLZ_SANITIZER "Instrument the build with GHOVLZ_SANITIZER_KIND" OFF)
+set(GHOVLZ_SANITIZER_KIND "address,undefined" CACHE STRING "Compiler sanitizer list")
+option(GHOVLZ_RT_ABORT "Abort when the audio thread trips the realtime guard" OFF)
+option(GHOVLZ_RT_HOOKS "Count malloc and sleeps on the audio thread in tests" ON)
+if(GHOVLZ_SANITIZER)
+    add_compile_options(-fsanitize=${GHOVLZ_SANITIZER_KIND} -fno-omit-frame-pointer)
+    add_link_options(-fsanitize=${GHOVLZ_SANITIZER_KIND})
+    add_compile_definitions(GHOVLZ_SANITIZER)
+    set(GHOVLZ_RT_HOOKS OFF)
+endif()
+if(GHOVLZ_RT_ABORT)
+    add_compile_definitions(GHOVLZ_RT_ABORT)
+endif()
+
+add_executable(GhovlzTests tests/Tests.cpp tests/ThemeTests.cpp tests/Pass3Tests.cpp tests/EditTests.cpp src/ui/Paint.cpp src/ui/Widgets.cpp src/ui/SoftwareCanvas.cpp src/ui/Renderer.cpp)
 target_link_libraries(GhovlzTests PRIVATE ghovlz_core Catch2::Catch2WithMain)
-add_dependencies(GhovlzTests GhovlzTestGain GhovlzCrash GhovlzPluginScan)
+if(WIN32)
+    target_sources(GhovlzTests PRIVATE src/ui/Direct2DCanvas.cpp)
+    target_link_libraries(GhovlzTests PRIVATE d3d11 dxgi d2d1 dwrite windowscodecs ole32 uuid)
+endif()
+if(UNIX AND NOT APPLE)
+    target_link_libraries(GhovlzTests PRIVATE X11)
+endif()
+target_include_directories(GhovlzTests PRIVATE "${stb_SOURCE_DIR}")
+target_compile_definitions(GhovlzTests PRIVATE GHOVLZ_ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets")
+add_dependencies(GhovlzTests GhovlzTestGain GhovlzCrash GhovlzTestSynth GhovlzHang GhovlzPluginScan)
+if(UNIX AND GHOVLZ_RT_HOOKS)
+    target_sources(GhovlzTests PRIVATE src/core/RtHooks.cpp)
+endif()
 
 if(WIN32)
     option(GHOVLZ_WITH_ASIO "Build the ASIO backend. The SDK is downloaded into the build tree unless GHOVLZ_ASIO_SDK_DIR is set." ON)
@@ -151,7 +192,9 @@ add_executable(GhovlzDAW
     src/audio/AsioBackend.cpp
     src/midi/MidiIO.cpp
     src/ui/SoftwareCanvas.cpp
-    src/ui/Paint.cpp)
+    src/ui/Paint.cpp
+    src/ui/Widgets.cpp
+    src/ui/Renderer.cpp)
 if(WIN32)
     target_sources(GhovlzDAW PRIVATE src/ui/Direct2DCanvas.cpp src/app/PlatformWin.cpp)
     target_link_libraries(GhovlzDAW PRIVATE d3d11 dxgi d2d1 dwrite windowscodecs ole32 uuid avrt)

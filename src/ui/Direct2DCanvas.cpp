@@ -17,6 +17,8 @@ extern "C" const GUID CLSID_D2D1Shadow = {0xC67EA361, 0x1863, 0x4e69, {0x89, 0xD
 #include <dxgi1_2.h>
 #include <wrl/client.h>
 
+#include "stb_image_write.h"
+
 #include <algorithm>
 #include <cmath>
 #include <map>
@@ -40,7 +42,7 @@ std::wstring widen(const std::string& text) {
 
 class Direct2DCanvas final : public Canvas {
 public:
-    Direct2DCanvas(HWND hwnd, int w, int h) : hwnd_(hwnd), w_(w), h_(h) { ready_ = create(); }
+    Direct2DCanvas(HWND hwnd, int w, int h, bool forceWarp) : hwnd_(hwnd), w_(w), h_(h), forceWarp_(forceWarp) { ready_ = create(); }
 
     int width() const override { return std::max(1, w_ * 96 / std::max(96, dpi_)); }
     int height() const override { return std::max(1, h_ * 96 / std::max(96, dpi_)); }
@@ -69,10 +71,13 @@ public:
         dc_->SetTransform(D2D1::Matrix3x2F::Identity());
     }
     void end() override {
-        if (!dc_ || !swap_)
+        if (!dc_)
             return;
         const HRESULT drawn = dc_->EndDraw();
-        const HRESULT presented = swap_->Present(1, 0);
+        capture();
+        HRESULT presented = S_OK;
+        if (swap_)
+            presented = swap_->Present(1, 0);
         if (drawn == D2DERR_RECREATE_TARGET || presented == DXGI_ERROR_DEVICE_REMOVED || presented == DXGI_ERROR_DEVICE_RESET)
             ready_ = create();
     }
@@ -262,7 +267,13 @@ public:
                         D2D1_BITMAP_INTERPOLATION_MODE_LINEAR,
                         D2D1::RectF(srcRect.x, srcRect.y, srcRect.x + srcRect.w, srcRect.y + srcRect.h));
     }
-    bool savePng(const std::string&) override { return false; }
+    bool savePng(const std::string& path) override {
+        if (readback_.size() != static_cast<size_t>(std::max(1, w_) * std::max(1, h_) * 4) && dc_)
+            capture();
+        if (readback_.empty())
+            return false;
+        return stbi_write_png(path.c_str(), w_, h_, 4, readback_.data(), w_ * 4) != 0;
+    }
 
 private:
     struct Key {
@@ -296,8 +307,10 @@ private:
         D3D_FEATURE_LEVEL levels[] = {D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0};
         D3D_FEATURE_LEVEL got = D3D_FEATURE_LEVEL_11_0;
         UINT flags = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
-        HRESULT hr = D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, flags, levels, 2, D3D11_SDK_VERSION,
-                                       &device_, &got, &context_);
+        HRESULT hr = E_FAIL;
+        if (!forceWarp_) {
+            hr = D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, flags, levels, 2, D3D11_SDK_VERSION, &device_, &got, &context_);
+        }
         if (FAILED(hr)) {
             hr = D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_WARP, nullptr, flags, levels, 2, D3D11_SDK_VERSION, &device_, &got, &context_);
             warp_ = SUCCEEDED(hr);
@@ -306,23 +319,25 @@ private:
             return false;
         ComPtr<IDXGIDevice> dxgi;
         device_.As(&dxgi);
-        ComPtr<IDXGIAdapter> adapter;
-        dxgi->GetAdapter(&adapter);
-        ComPtr<IDXGIFactory2> factory;
-        adapter->GetParent(IID_PPV_ARGS(&factory));
-        DXGI_SWAP_CHAIN_DESC1 desc{};
-        desc.Width = static_cast<UINT>(std::max(1, w_));
-        desc.Height = static_cast<UINT>(std::max(1, h_));
-        desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
-        desc.SampleDesc.Count = 1;
-        desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-        desc.BufferCount = 2;
-        desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
-        desc.Scaling = DXGI_SCALING_STRETCH;
-        desc.AlphaMode = DXGI_ALPHA_MODE_IGNORE;
-        if (FAILED(factory->CreateSwapChainForHwnd(device_.Get(), hwnd_, &desc, nullptr, nullptr, &swap_)))
-            return false;
-        factory->MakeWindowAssociation(hwnd_, DXGI_MWA_NO_ALT_ENTER);
+        if (hwnd_) {
+            ComPtr<IDXGIAdapter> adapter;
+            dxgi->GetAdapter(&adapter);
+            ComPtr<IDXGIFactory2> factory;
+            adapter->GetParent(IID_PPV_ARGS(&factory));
+            DXGI_SWAP_CHAIN_DESC1 desc{};
+            desc.Width = static_cast<UINT>(std::max(1, w_));
+            desc.Height = static_cast<UINT>(std::max(1, h_));
+            desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+            desc.SampleDesc.Count = 1;
+            desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+            desc.BufferCount = 2;
+            desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+            desc.Scaling = DXGI_SCALING_STRETCH;
+            desc.AlphaMode = DXGI_ALPHA_MODE_IGNORE;
+            if (FAILED(factory->CreateSwapChainForHwnd(device_.Get(), hwnd_, &desc, nullptr, nullptr, &swap_)))
+                return false;
+            factory->MakeWindowAssociation(hwnd_, DXGI_MWA_NO_ALT_ENTER);
+        }
         if (!factory_) {
             D2D1_FACTORY_OPTIONS options{};
             if (FAILED(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, __uuidof(ID2D1Factory1), &options,
@@ -336,8 +351,10 @@ private:
         if (!write_)
             DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory), reinterpret_cast<IUnknown**>(write_.GetAddressOf()));
         UINT dpi = 96;
-        if (auto getDpi = reinterpret_cast<UINT(WINAPI*)(HWND)>(GetProcAddress(GetModuleHandleW(L"user32.dll"), "GetDpiForWindow")))
-            dpi = getDpi(hwnd_);
+        if (hwnd_) {
+            if (auto getDpi = reinterpret_cast<UINT(WINAPI*)(HWND)>(GetProcAddress(GetModuleHandleW(L"user32.dll"), "GetDpiForWindow")))
+                dpi = getDpi(hwnd_);
+        }
         applyDpi(static_cast<int>(dpi));
         return bindTarget();
     }
@@ -349,17 +366,62 @@ private:
     }
 
     bool bindTarget() {
-        ComPtr<IDXGISurface> surface;
-        if (FAILED(swap_->GetBuffer(0, IID_PPV_ARGS(&surface))))
-            return false;
-        D2D1_BITMAP_PROPERTIES1 props = D2D1::BitmapProperties1(
-            D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW,
-            D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
         target_.Reset();
-        if (FAILED(dc_->CreateBitmapFromDxgiSurface(surface.Get(), &props, &target_)))
-            return false;
+        if (swap_) {
+            ComPtr<IDXGISurface> surface;
+            if (FAILED(swap_->GetBuffer(0, IID_PPV_ARGS(&surface))))
+                return false;
+            D2D1_BITMAP_PROPERTIES1 props = D2D1::BitmapProperties1(
+                D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW,
+                D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
+            if (FAILED(dc_->CreateBitmapFromDxgiSurface(surface.Get(), &props, &target_)))
+                return false;
+        } else {
+            D2D1_BITMAP_PROPERTIES1 props = D2D1::BitmapProperties1(
+                D2D1_BITMAP_OPTIONS_TARGET, D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
+            if (FAILED(dc_->CreateBitmap(D2D1::SizeU(static_cast<UINT32>(std::max(1, w_)), static_cast<UINT32>(std::max(1, h_))),
+                                         nullptr, 0, &props, &target_)))
+                return false;
+        }
         dc_->SetTarget(target_.Get());
         return true;
+    }
+
+    void capture() {
+        readback_.clear();
+        if (!dc_ || !target_ || w_ < 1 || h_ < 1)
+            return;
+        D2D1_BITMAP_PROPERTIES1 props = D2D1::BitmapProperties1(
+            D2D1_BITMAP_OPTIONS_CPU_READ | D2D1_BITMAP_OPTIONS_CANNOT_DRAW,
+            D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
+        ComPtr<ID2D1Bitmap1> cpu;
+        if (FAILED(dc_->CreateBitmap(D2D1::SizeU(static_cast<UINT32>(w_), static_cast<UINT32>(h_)), nullptr, 0, &props, &cpu)))
+            return;
+        dc_->SetTarget(nullptr);
+        const HRESULT copied = cpu->CopyFromBitmap(nullptr, target_.Get(), nullptr);
+        dc_->SetTarget(target_.Get());
+        if (FAILED(copied))
+            return;
+        D2D1_MAPPED_RECT mapped{};
+        if (FAILED(cpu->Map(D2D1_MAP_OPTIONS_READ, &mapped)))
+            return;
+        readback_.assign(static_cast<size_t>(w_ * h_ * 4), 0);
+        for (int y = 0; y < h_; ++y) {
+            const auto* src = reinterpret_cast<const uint8_t*>(mapped.bits) + static_cast<size_t>(y) * mapped.pitch;
+            for (int x = 0; x < w_; ++x) {
+                const uint8_t b = src[x * 4];
+                const uint8_t g = src[x * 4 + 1];
+                const uint8_t r = src[x * 4 + 2];
+                const uint8_t a = src[x * 4 + 3];
+                const int scale = a == 0 ? 0 : 255;
+                uint8_t* dst = readback_.data() + static_cast<size_t>(y * w_ + x) * 4;
+                dst[0] = static_cast<uint8_t>(a == 0 ? 0 : r * scale / a);
+                dst[1] = static_cast<uint8_t>(a == 0 ? 0 : g * scale / a);
+                dst[2] = static_cast<uint8_t>(a == 0 ? 0 : b * scale / a);
+                dst[3] = a;
+            }
+        }
+        cpu->Unmap();
     }
 
     HWND hwnd_ = nullptr;
@@ -368,6 +430,8 @@ private:
     int dpi_ = 96;
     bool ready_ = false;
     bool warp_ = false;
+    bool forceWarp_ = false;
+    std::vector<uint8_t> readback_;
     int clipDepth_ = 0;
     ComPtr<ID3D11Device> device_;
     ComPtr<ID3D11DeviceContext> context_;
@@ -381,8 +445,8 @@ private:
     std::map<std::string, ComPtr<ID2D1Effect>> blurs_;
 };
 
-std::unique_ptr<Canvas> makeDirect2DCanvas(void* hwnd, int width, int height) {
-    auto canvas = std::make_unique<Direct2DCanvas>(static_cast<HWND>(hwnd), width, height);
+std::unique_ptr<Canvas> makeDirect2DCanvas(void* hwnd, int width, int height, bool forceWarp) {
+    auto canvas = std::make_unique<Direct2DCanvas>(static_cast<HWND>(hwnd), width, height, forceWarp);
     if (!canvas->ready())
         return nullptr;
     return canvas;

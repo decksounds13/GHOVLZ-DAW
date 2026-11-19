@@ -6,6 +6,7 @@
 #include <atomic>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -19,13 +20,15 @@ public:
     ~Engine();
 
     void setPluginHost(std::shared_ptr<PluginHost> host);
+    void pumpEditors();
     void prepare(double sampleRate, int block);
     void release();
     void setProject(std::shared_ptr<Project> project);
     std::shared_ptr<Project> project() const;
 
     void process(float* interleavedOut, const float* interleavedIn, int frames);
-    void pushMidi(int sampleOffset, uint8_t status, uint8_t data1, uint8_t data2);
+    void pushMidi(int sampleOffset, uint8_t status, uint8_t data1, uint8_t data2, int size = 3);
+    int midiDelivered() const { return midiDelivered_.load(); }
 
     void play();
     void stop();
@@ -38,6 +41,13 @@ public:
     float meter(const std::string& trackId) const;
     float holdMeter(const std::string& trackId) const;
     bool clipLamp(const std::string& trackId) const;
+
+    // Per-channel levels written by the audio thread. The UI reads them; the theme does not.
+    struct TrackLevels {
+        float peakL = 0, peakR = 0, rmsL = 0, rmsR = 0, holdL = 0, holdR = 0;
+        bool clip = false;
+    };
+    TrackLevels levels(const std::string& trackId) const;
 
     void setVolumeDb(const std::string& track, float db);
     void setPan(const std::string& track, float pan);
@@ -52,7 +62,12 @@ public:
     Device* device(const std::string& id);
 
     void launchScene(int scene);
+    void launchSceneQuantized(int scene);
     void launchSlot(const std::string& track, int scene);
+    void stopSession();
+    void stopSlot(const std::string& track);
+    int playingScene(const std::string& track);
+    double slotOrigin(const std::string& track);
     bool saveProject(const std::string& folder);
     bool loadProject(const std::string& folder);
     bool renderToWav(const std::string& path);
@@ -65,25 +80,58 @@ public:
         std::vector<float> data[2];
     };
     struct RecSlot {
-        std::vector<float> samples;
-        std::atomic<int> used {0};
+        std::vector<float> ring;
+        std::atomic<uint32_t> w {0};
+        std::atomic<uint32_t> r {0};
+        uint32_t mask = 0;
+        std::atomic<int> drops {0};
+        std::atomic<bool> retired {false};
+        std::atomic<bool> drained {false};
         double startQ = 0;
         int rate = 48000;
         int channels = 2;
+        int sessionScene = -1;
+        std::string track;
+        std::string path;
+        void* stream = nullptr;
     };
+
+    void armDeadlines(bool on) { deadlines_.store(on); }
+    int deadlineMisses() const { return deadlineMisses_.load(); }
+    int recordDrops() const { return recordDrops_.load(); }
 
 private:
     void publish();
     void finalizeTakes();
+    void ensureWriter();
     std::shared_ptr<Device> makeLive(const DeviceState& state);
 
     Graph* acquire() const;
     void releaseGraph() const;
 
     std::shared_ptr<Project> project_;
-    mutable std::atomic<Graph*> published_ {nullptr};
+    // Published through atomic_load / atomic_store. The audio thread copies it
+    // and holds the copy until releaseGraph(), so a replaced graph stays alive.
+    std::shared_ptr<Graph> publishedGraph_;
+    // Readers inside acquire/release. Recording waits for this to hit zero
+    // before it reuses a take buffer.
     mutable std::atomic<int> readers_ {0};
-    std::vector<std::unique_ptr<Graph>> owned_;
+    // A reader that holds the last reference parks it here. drainRetired()
+    // runs on the thread that publishes, so the audio thread does not free.
+    struct Retired {
+        std::shared_ptr<Graph> graph;
+        std::atomic<int> state {0};
+    };
+    static constexpr int kParked = 16;
+    mutable Retired parked_[kParked];
+    struct PinState {
+        std::shared_ptr<Graph> keep;
+        Graph* held = nullptr;
+        int depth = 0;
+    };
+    static PinState& pinState();
+    void retireGraph(std::shared_ptr<Graph> graph) const;
+    void drainRetired();
     std::shared_ptr<PluginHost> plugins_;
     double sampleRate_ = 48000;
     int block_ = 512;
@@ -98,14 +146,23 @@ private:
         uint8_t status = 0;
         uint8_t d1 = 0;
         uint8_t d2 = 0;
+        uint8_t size = 3;
     };
     AudioBuffer mix_;
     MidiBuffer silentMidi_;
     LiveMidi midiRing_[256] {};
     std::atomic<int> midiW_ {0};
     std::atomic<int> midiR_ {0};
+    std::atomic<int> midiDelivered_ {0};
+    std::atomic<bool> deadlines_ {false};
+    std::atomic<int> deadlineMisses_ {0};
+    std::atomic<bool> writerRun_ {false};
+    void* writer_ = nullptr;
     std::map<std::string, DelayLineState> delays_;
     std::map<std::string, std::unique_ptr<RecSlot>> recs_;
+    std::vector<std::unique_ptr<RecSlot>> retired_;
+    std::mutex recMu_;
+    std::atomic<int> recordDrops_ {0};
 };
 
 } // namespace ghovlz

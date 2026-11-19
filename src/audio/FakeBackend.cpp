@@ -14,7 +14,7 @@ bool FakeBackend::open(Engine* engine, const AudioSettings& settings) {
     if (settings_.frames < 16)
         settings_.frames = 256;
     output_.assign(static_cast<size_t>(settings_.frames) * 2, 0.f);
-    needsReopen_ = false;
+    needsReopen_.store(false, std::memory_order_release);
     if (engine_)
         engine_->prepare(settings_.sampleRate, settings_.frames);
     return engine_ != nullptr;
@@ -28,10 +28,10 @@ void FakeBackend::pump(const float* input) {
     engine_->process(output_.data(), input, settings_.frames);
 }
 
-void FakeBackend::noteStopped() { needsReopen_ = true; }
+void FakeBackend::noteStopped() { needsReopen_.store(true, std::memory_order_release); }
 
 bool FakeBackend::recover() {
-    if (!needsReopen_)
+    if (!needsReopen())
         return true;
     return open(engine_, settings_);
 }
