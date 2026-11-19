@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="700" viewBox="0 0 980 700">
+  <rect width="980" height="700" fill="#0A0A0A"/>
+  <text x="16" y="22" fill="#D1BCAC" font-family="ui-sans-serif,Segoe UI,sans-serif" font-size="13">EQ expanded — design 1200×850, shown scaled. Same view for in-lane expand and the Device-view panel.</text>
+  <!-- top trim -->
+  <rect x="16" y="36" width="948" height="36" rx="4" fill="#161311" stroke="#3C3732"/>
+  <text x="28" y="59" fill="#E8DCC8" font-family="ui-sans-serif,Segoe UI,sans-serif" font-size="12">Bypass   A B C D   Undo   Preset ▾   Save   Eco   Phase: Minimum ▾   ⌄ collapse</text>
+  <text x="860" y="59" fill="#DAA520" font-family="ui-sans-serif,Segoe UI,sans-serif" font-size="12">GHOVLZ! EQ</text>
+  <!-- graph -->
+  <rect x="16" y="80" width="760" height="300" rx="4" fill="#100E0C" stroke="#3C3732"/>
+  <text x="28" y="100" fill="#8A8078" font-family="ui-sans-serif,Segoe UI,sans-serif" font-size="11">spectrum pre/post  +  sum curve  +  per-band curves  +  spectral GR  +  SideCheck GR</text>
+  <polyline points="40,300 120,280 200,200 280,290 400,250 520,180 680,260 750,300" fill="none" stroke="#E8DCC8" stroke-width="2"/>
+  <circle cx="200" cy="200" r="7" fill="#7CFF6E"/>
+  <circle cx="400" cy="250" r="6" fill="#6EC8FF"/>
+  <circle cx="520" cy="180" r="6" fill="#FF6E00"/>
+  <text x="40" y="360" fill="#8A8078" font-family="ui-sans-serif,Segoe UI,sans-serif" font-size="11">20        50        100       200       500      1k       2k       5k      10k     20k</text>
+  <!-- meters -->
+  <rect x="786" y="80" width="36" height="300" fill="#100E0C" stroke="#3C3732"/>
+  <rect x="796" y="200" width="6" height="160" fill="#FF821E"/>
+  <rect x="808" y="180" width="6" height="180" fill="#DAA520"/>
+  <text x="790" y="74" fill="#8A8078" font-family="ui-sans-serif,Segoe UI,sans-serif" font-size="10">IN</text>
+  <rect x="828" y="80" width="36" height="300" fill="#100E0C" stroke="#3C3732"/>
+  <rect x="838" y="190" width="6" height="170" fill="#FF821E"/>
+  <rect x="850" y="170" width="6" height="190" fill="#DAA520"/>
+  <text x="832" y="74" fill="#8A8078" font-family="ui-sans-serif,Segoe UI,sans-serif" font-size="10">OUT</text>
+  <rect x="872" y="80" width="92" height="300" fill="#100E0C" stroke="#3C3732"/>
+  <text x="884" y="110" fill="#8A8078" font-family="ui-sans-serif,Segoe UI,sans-serif" font-size="11">OSC</text>
+  <polyline points="884,150 900,130 916,160 932,140 948,155" fill="none" stroke="#DAA520" stroke-width="1.2"/>
+  <text x="884" y="200" fill="#8A8078" font-family="ui-sans-serif,Segoe UI,sans-serif" font-size="11">GON</text>
+  <circle cx="918" cy="250" r="28" fill="none" stroke="#3C3732"/>
+  <text x="884" y="310" fill="#8A8078" font-family="ui-sans-serif,Segoe UI,sans-serif" font-size="11">LUFS −14.2</text>
+  <!-- faceplate -->
+  <rect x="16" y="390" width="948" height="210" rx="4" fill="#120F0D" stroke="#3C3732"/>
+  <text x="28" y="412" fill="#D1BCAC" font-family="ui-sans-serif,Segoe UI,sans-serif" font-size="12">Bank 1 of 8     Band 1 HP … Band 8 LP     selected band drives the knobs</text>
+  <g font-family="ui-sans-serif,Segoe UI,sans-serif" font-size="10" fill="#8A8078">
+    <text x="40" y="460">Freq</text>
+    <text x="110" y="460">Gain</text>
+    <text x="180" y="460">Q</text>
+    <text x="250" y="460">Type</text>
+    <text x="330" y="460">Slope</text>
+    <text x="410" y="460">Chan</text>
+    <text x="490" y="460">Dyn</text>
+    <text x="560" y="460">Sat</text>
+    <text x="630" y="460">S</text>
+    <text x="690" y="460">On</text>
+    <text x="760" y="460">Solo</text>
+  </g>
+  <g fill="none" stroke="#FF6E00" stroke-width="3">
+    <circle cx="52" cy="500" r="16"/>
+    <circle cx="122" cy="500" r="16"/>
+    <circle cx="192" cy="500" r="16"/>
+  </g>
+  <text x="28" y="560" fill="#8A8078" font-family="ui-sans-serif,Segoe UI,sans-serif" font-size="11">Mod matrix (3 LFOs + envelope + shape → freq/gain/Q) sits under the graph when Mod is open. Scope quad replaces the graph when Scope is open.</text>
+  <!-- bottom trim -->
+  <rect x="16" y="612" width="948" height="32" fill="#2A2118"/>
+  <text x="28" y="633" fill="#B49637" font-family="ui-sans-serif,Segoe UI,sans-serif" font-size="12">?    Minimum Phase ▾          GHOVLZ! EQ          Out  0.0 dB     A</text>
+  <text x="16" y="674" fill="#8A8078" font-family="ui-sans-serif,Segoe UI,sans-serif" font-size="11">Analyzer modules (spectrum, spectrogram, scope, goniometer, loudness, histogram, stereogram, THD) open from Scope. Spec3D is a later ticket.</text>
+</svg>

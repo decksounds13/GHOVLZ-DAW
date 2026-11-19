@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="420" viewBox="0 0 980 420">
+  <rect width="980" height="420" fill="#0A0A0A"/>
+  <text x="16" y="22" fill="#D1BCAC" font-family="ui-sans-serif,Segoe UI,sans-serif" font-size="13">DYN expanded, All — the Focus row becomes band cards. The big transfer is hidden.</text>
+  <rect x="16" y="40" width="948" height="28" fill="#161311" stroke="#3C3732"/>
+  <text x="28" y="59" fill="#E8DCC8" font-family="ui-sans-serif,Segoe UI,sans-serif" font-size="12">same top trim and spectrum as Focus                         [ Focus | All ]</text>
+  <g font-family="ui-sans-serif,Segoe UI,sans-serif" font-size="11">
+    <rect x="16" y="84" width="300" height="280" fill="#120F0D" stroke="#7CFF6E"/>
+    <text x="28" y="106" fill="#7CFF6E">Band 1   On  Solo</text>
+    <rect x="28" y="120" width="70" height="70" fill="#100E0C" stroke="#3C3732"/>
+    <text x="36" y="160" fill="#8A8078" font-size="10">mini xfer</text>
+    <text x="110" y="150" fill="#8A8078">Thr  Ratio  Atk</text>
+    <text x="110" y="176" fill="#8A8078">Rel  Knee  Make</text>
+    <rect x="250" y="130" width="16" height="140" fill="#1A1614"/>
+    <rect x="254" y="140" width="8" height="40" fill="#FF6E00"/>
+    <text x="28" y="250" fill="#8A8078">GR grows down from 0 dB</text>
+    <rect x="332" y="84" width="300" height="280" fill="#120F0D" stroke="#6EC8FF"/>
+    <text x="344" y="106" fill="#6EC8FF">Band 2</text>
+    <rect x="648" y="84" width="300" height="280" fill="#120F0D" stroke="#FF6E00"/>
+    <text x="660" y="106" fill="#FF6E00">Band 3   (selected card keeps a gold stroke)</text>
+  </g>
+  <text x="16" y="390" fill="#8A8078" font-family="ui-sans-serif,Segoe UI,sans-serif" font-size="12">Up to six cards. dynFaceAll is the mode flag. Global Time / Amount / Down / Up stay in the right column, same as Focus.</text>
+</svg>

@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="240" viewBox="0 0 640 240">
+  <rect width="640" height="240" fill="#0A0A0A"/>
+  <text x="16" y="22" fill="#D1BCAC" font-family="ui-sans-serif,Segoe UI,sans-serif" font-size="13">EQ compact tile, inside the 176 px arrangement lane</text>
+  <rect x="16" y="36" width="280" height="156" rx="8" fill="#120F0D" stroke="#3C3732"/>
+  <rect x="16" y="36" width="4" height="156" fill="#B49637"/>
+  <text x="28" y="54" fill="#E8DCC8" font-family="ui-sans-serif,Segoe UI,sans-serif" font-size="13" font-weight="600">EQ Eight</text>
+  <text x="250" y="54" fill="#DAA520" font-family="ui-sans-serif,Segoe UI,sans-serif" font-size="14">⌃</text>
+  <!-- spectrum -->
+  <polygon points="28,168 40,150 70,140 100,120 130,128 160,100 190,110 220,130 250,145 268,160 268,168" fill="#FF821E" opacity="0.35"/>
+  <!-- curve -->
+  <polyline points="28,150 70,148 110,110 150,148 200,140 250,120 268,150" fill="none" stroke="#E8DCC8" stroke-width="1.6"/>
+  <circle cx="110" cy="110" r="5" fill="#7CFF6E" stroke="#0A0A0A"/>
+  <circle cx="200" cy="140" r="4" fill="#6EC8FF" stroke="#0A0A0A"/>
+  <circle cx="250" cy="120" r="4" fill="#FF6E00" stroke="#0A0A0A"/>
+  <text x="28" y="182" fill="#8A8078" font-family="ui-sans-serif,Segoe UI,sans-serif" font-size="10">20 Hz log → 20 kHz     drag node: X freq, Y gain</text>
+  <!-- sibling -->
+  <rect x="308" y="36" width="150" height="156" rx="8" fill="#120F0D" stroke="#3C3732"/>
+  <rect x="308" y="36" width="4" height="156" fill="#3C3732"/>
+  <text x="320" y="54" fill="#8A8078" font-family="ui-sans-serif,Segoe UI,sans-serif" font-size="13">Glue</text>
+  <text x="320" y="120" fill="#5A534C" font-family="ui-sans-serif,Segoe UI,sans-serif" font-size="11">unchanged tile</text>
+  <text x="16" y="220" fill="#8A8078" font-family="ui-sans-serif,Segoe UI,sans-serif" font-size="11">Chevron or double-click the title expands this device in the lane. Wheel on a node edits Q (slope on HP/LP).</text>
+</svg>

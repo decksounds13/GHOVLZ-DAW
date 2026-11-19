@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="360" viewBox="0 0 980 360">
+  <rect width="980" height="360" fill="#0A0A0A"/>
+  <text x="16" y="22" fill="#D1BCAC" font-family="ui-sans-serif,Segoe UI,sans-serif" font-size="13">Arrangement. Compact chain is 176 px. Expanded chain grows to 440 px and the selected device fills the width.</text>
+  <!-- fake tracks -->
+  <rect x="16" y="40" width="948" height="36" fill="#161311"/>
+  <text x="28" y="63" fill="#8A8078" font-family="ui-sans-serif,Segoe UI,sans-serif" font-size="12">Drums</text>
+  <rect x="16" y="78" width="948" height="36" fill="#120F0D"/>
+  <text x="28" y="101" fill="#E8DCC8" font-family="ui-sans-serif,Segoe UI,sans-serif" font-size="12">Synth Lead    ← selected track owns the lane</text>
+  <rect x="16" y="116" width="948" height="28" fill="#100E0C"/>
+  <text x="28" y="135" fill="#5A534C" font-family="ui-sans-serif,Segoe UI,sans-serif" font-size="11">Bass</text>
+  <!-- compact lane -->
+  <rect x="16" y="156" width="948" height="70" fill="#0A0A0A" stroke="#3C3732"/>
+  <text x="24" y="172" fill="#8A8078" font-family="ui-sans-serif,Segoe UI,sans-serif" font-size="10">COMPACT 176 px</text>
+  <rect x="24" y="180" width="200" height="38" fill="#120F0D" stroke="#B49637"/>
+  <text x="32" y="204" fill="#E8DCC8" font-family="ui-sans-serif,Segoe UI,sans-serif" font-size="11">EQ  live curve + nodes</text>
+  <rect x="232" y="180" width="160" height="38" fill="#120F0D" stroke="#3C3732"/>
+  <text x="240" y="204" fill="#8A8078" font-family="ui-sans-serif,Segoe UI,sans-serif" font-size="11">Glue  knobs</text>
+  <rect x="400" y="180" width="200" height="38" fill="#120F0D" stroke="#FF821E"/>
+  <text x="408" y="204" fill="#E8DCC8" font-family="ui-sans-serif,Segoe UI,sans-serif" font-size="11">DYN  bands + thresholds</text>
+  <!-- expanded -->
+  <rect x="16" y="240" width="948" height="100" fill="#0A0A0A" stroke="#DAA520"/>
+  <text x="24" y="256" fill="#DAA520" font-family="ui-sans-serif,Segoe UI,sans-serif" font-size="10">EXPANDED 440 px — siblings collapse to a name strip</text>
+  <rect x="24" y="266" width="70" height="22" fill="#161311" stroke="#3C3732"/>
+  <text x="30" y="281" fill="#8A8078" font-family="ui-sans-serif,Segoe UI,sans-serif" font-size="10">Glue</text>
+  <rect x="100" y="266" width="70" height="22" fill="#161311" stroke="#FF821E"/>
+  <text x="108" y="281" fill="#E8DCC8" font-family="ui-sans-serif,Segoe UI,sans-serif" font-size="10">DYN</text>
+  <rect x="180" y="264" width="770" height="66" fill="#120F0D" stroke="#B49637"/>
+  <text x="192" y="302" fill="#E8DCC8" font-family="ui-sans-serif,Segoe UI,sans-serif" font-size="12">EQ Eight — full editor, same EqView as the Device-view panel, laid out in the remaining lane rect</text>
+</svg>
