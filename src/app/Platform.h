@@ -4,6 +4,7 @@
 #include "model/Project.h"
 #include "model/Undo.h"
 #include "ui/Paint.h"
+#include "ui/Widgets.h"
 
 #include <memory>
 
@@ -14,6 +15,8 @@ struct AppHost {
     std::shared_ptr<Project> project;
     Frame frame;
     UndoStack undo;
+    WidgetLayer widgets;
+    ThemeProvider* themes = nullptr;
 };
 
 // Opens a window and returns when the user closes it. Linux uses the software

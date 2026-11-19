@@ -9,6 +9,7 @@ namespace ghovlz {
 
 class Engine;
 class Project;
+class WidgetLayer;
 
 enum class View { Arrangement, Session, Perform, Mixer, Device, Piano, Browser, Plugin, Prefs };
 
@@ -37,6 +38,8 @@ struct Frame {
     std::string prefMessage;
     // UI thread only. Null uses the GHOVLZ Gold built-in. The audio thread never reads this.
     const Theme* theme = nullptr;
+    // Filled by paintFrame. Null skips hit targets.
+    WidgetLayer* widgets = nullptr;
 };
 
 void paintFrame(Canvas& canvas, const Frame& frame);

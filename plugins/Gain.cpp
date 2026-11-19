@@ -2,9 +2,11 @@
 #include "public.sdk/source/vst/vstsinglecomponenteffect.h"
 #include "pluginterfaces/base/ibstream.h"
 #include "pluginterfaces/gui/iplugview.h"
+#include "pluginterfaces/gui/iplugviewcontentscalesupport.h"
 #include "pluginterfaces/vst/ivstparameterchanges.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 
@@ -23,10 +25,22 @@ namespace Vst {
 static constexpr ParamID kGainId = 100;
 
 // HOST-07. Creates a native child (HWND or X11) and paints the gain view into it.
-class GainView final : public IPlugView {
+class GainTick final : public Steinberg::Linux::ITimerHandler {
+public:
+    tresult PLUGIN_API queryInterface(const TUID, void** obj) override {
+        *obj = nullptr;
+        return kNoInterface;
+    }
+    uint32 PLUGIN_API addRef() override { return 1000; }
+    uint32 PLUGIN_API release() override { return 1000; }
+    void PLUGIN_API onTimer() override {}
+};
+
+class GainView final : public IPlugView, public IPlugViewContentScaleSupport {
 public:
     GainView() { FUNKNOWN_CTOR }
     ~GainView() {
+        unhookRunLoop();
         destroyNative();
         FUNKNOWN_DTOR
     }
@@ -48,8 +62,10 @@ public:
         return createNative() ? kResultOk : kResultFalse;
     }
     tresult PLUGIN_API removed() SMTG_OVERRIDE {
+        unhookRunLoop();
         destroyNative();
         parent_ = nullptr;
+        frame_ = nullptr;
         return kResultOk;
     }
     tresult PLUGIN_API onWheel(float) SMTG_OVERRIDE { return kResultFalse; }
@@ -65,8 +81,23 @@ public:
         if (!newSize || newSize->getWidth() < 1 || newSize->getHeight() < 1)
             return kInvalidArgument;
         rect_ = *newSize;
+        if (scale_ > 0.f) {
+            baseW_ = std::max(1, static_cast<int>(std::lround(static_cast<float>(rect_.getWidth()) / scale_)));
+            baseH_ = std::max(1, static_cast<int>(std::lround(static_cast<float>(rect_.getHeight()) / scale_)));
+        }
         resizeNative();
         paintNative();
+        return kResultOk;
+    }
+    tresult PLUGIN_API setContentScaleFactor(ScaleFactor factor) SMTG_OVERRIDE {
+        if (!(factor >= 0.5f && factor <= 4.f))
+            return kInvalidArgument;
+        scale_ = factor;
+        ViewRect next {0, 0, std::max(1, static_cast<int>(std::lround(static_cast<float>(baseW_) * scale_))),
+                       std::max(1, static_cast<int>(std::lround(static_cast<float>(baseH_) * scale_)))};
+        if (frame_)
+            return frame_->resizeView(this, &next);
+        rect_ = next;
         return kResultOk;
     }
     tresult PLUGIN_API onFocus(TBool) SMTG_OVERRIDE { return kResultOk; }
@@ -104,6 +135,7 @@ private:
         if (!hwnd_)
             return false;
         paintNative();
+        hookRunLoop();
         return true;
 #else
         display_ = XOpenDisplay(nullptr);
@@ -124,8 +156,29 @@ private:
         XMapWindow(display_, child_);
         paintNative();
         XFlush(display_);
+        hookRunLoop();
         return true;
 #endif
+    }
+    void hookRunLoop() {
+        if (!frame_ || timerOn_)
+            return;
+        Linux::IRunLoop* loop = nullptr;
+        if (frame_->queryInterface(Linux::IRunLoop::iid, reinterpret_cast<void**>(&loop)) != kResultOk || !loop)
+            return;
+        if (loop->registerTimer(&tick_, 32) == kResultOk)
+            timerOn_ = true;
+        loop->release();
+    }
+    void unhookRunLoop() {
+        if (!frame_ || !timerOn_)
+            return;
+        Linux::IRunLoop* loop = nullptr;
+        if (frame_->queryInterface(Linux::IRunLoop::iid, reinterpret_cast<void**>(&loop)) == kResultOk && loop) {
+            loop->unregisterTimer(&tick_);
+            loop->release();
+        }
+        timerOn_ = false;
     }
     void resizeNative() {
         const int w = rect_.getWidth();
@@ -157,7 +210,11 @@ private:
         SelectObject(hdc, gold);
         const int cx = w / 2;
         const int cy = h / 2;
-        Ellipse(hdc, cx - 36, cy - 36, cx + 36, cy + 36);
+        const int disc = std::max(24, static_cast<int>(std::lround(36.f * scale_)));
+        const int bar = std::max(8, static_cast<int>(std::lround(8.f * scale_)));
+        RECT barRc {0, 0, w, bar};
+        FillRect(hdc, &barRc, gold);
+        Ellipse(hdc, cx - disc, cy - disc, cx + disc, cy + disc);
         DeleteObject(gold);
         SetBkMode(hdc, TRANSPARENT);
         SetTextColor(hdc, RGB(245, 245, 245));
@@ -172,11 +229,13 @@ private:
                 break;
             XSync(display_, False);
         }
+        const int bar = std::max(8, static_cast<int>(std::lround(8.f * scale_)));
+        const int disc = std::max(24, static_cast<int>(std::lround(36.f * scale_)));
         XSetForeground(display_, gc_, 0x000A0A0A);
         XFillRectangle(display_, child_, gc_, 0, 0, static_cast<unsigned>(w), static_cast<unsigned>(h));
         XSetForeground(display_, gc_, 0x00B49637);
-        XFillRectangle(display_, child_, gc_, 0, 0, static_cast<unsigned>(w), 8);
-        XFillArc(display_, child_, gc_, w / 2 - 36, h / 2 - 36, 72, 72, 0, 360 * 64);
+        XFillRectangle(display_, child_, gc_, 0, 0, static_cast<unsigned>(w), static_cast<unsigned>(bar));
+        XFillArc(display_, child_, gc_, w / 2 - disc, h / 2 - disc, disc * 2, disc * 2, 0, 360 * 64);
         XSetForeground(display_, gc_, 0x00F5F5F5);
         XDrawString(display_, child_, gc_, 16, 28, "GHOVLZ Gain", 11);
         XSync(display_, False);
@@ -205,6 +264,11 @@ private:
     void* parent_ = nullptr;
     IPlugFrame* frame_ = nullptr;
     ViewRect rect_ {0, 0, 480, 300};
+    int baseW_ = 480;
+    int baseH_ = 300;
+    float scale_ = 1.f;
+    GainTick tick_;
+    bool timerOn_ = false;
 #if defined(_WIN32)
     HWND hwnd_ = nullptr;
 #else
@@ -215,6 +279,7 @@ private:
 };
 
 tresult PLUGIN_API GainView::queryInterface(const TUID iid, void** obj) {
+    QUERY_INTERFACE(iid, obj, IPlugViewContentScaleSupport::iid, IPlugViewContentScaleSupport)
     QUERY_INTERFACE(iid, obj, IPlugView::iid, IPlugView)
     QUERY_INTERFACE(iid, obj, FUnknown::iid, IPlugView)
     *obj = nullptr;

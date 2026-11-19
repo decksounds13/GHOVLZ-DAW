@@ -210,5 +210,7 @@ int main(int argc, char** argv) {
     host.engine = &engine;
     host.project = project;
     host.frame = frame;
+    host.themes = &themes;
+    host.frame.widgets = &host.widgets;
     return ghovlz::runWindow(host);
 }

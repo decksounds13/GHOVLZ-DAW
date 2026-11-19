@@ -5,6 +5,7 @@
 #include "model/Undo.h"
 #include "ui/ColourDice.h"
 #include "ui/Theme.h"
+#include "pluginterfaces/gui/iplugview.h"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -24,6 +25,7 @@
 #else
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
+#include <unistd.h>
 #endif
 
 namespace fs = std::filesystem;
@@ -320,6 +322,15 @@ TEST_CASE("HOST-07 the gain view is a native child and resizes") {
     REQUIRE(GetClientRect(child, &rc));
     REQUIRE(rc.right - rc.left == 520);
     REQUIRE(rc.bottom - rc.top == 280);
+    int scaledW = 0;
+    int scaledH = 0;
+    REQUIRE(host.setEditorScale(*device, 2.f, scaledW, scaledH, error));
+    REQUIRE(scaledW == 1040);
+    REQUIRE(scaledH == 560);
+    REQUIRE(GetClientRect(child, &rc));
+    REQUIRE(rc.right - rc.left == 1040);
+    REQUIRE(rc.bottom - rc.top == 560);
+    REQUIRE_FALSE(host.setEditorScale(*device, 0.f, scaledW, scaledH, error));
     host.closeEditor(*device);
     REQUIRE(FindWindowExW(parent, nullptr, L"GhovlzGainView", nullptr) == nullptr);
     DestroyWindow(parent);
@@ -364,6 +375,56 @@ TEST_CASE("HOST-07 the gain view is a native child and resizes") {
         image = nullptr;
     }
     REQUIRE(gold);
+    int scaledW = 0;
+    int scaledH = 0;
+    REQUIRE(host.setEditorScale(*device, 2.f, scaledW, scaledH, error));
+    REQUIRE(scaledW == 1040);
+    REQUIRE(scaledH == 560);
+    REQUIRE(XGetGeometry(display, kids[0], &root, &x, &y, &width, &height, &border, &depth) != 0);
+    REQUIRE(width == 1040);
+    REQUIRE(height == 560);
+    REQUIRE_FALSE(host.setEditorScale(*device, 0.f, scaledW, scaledH, error));
+    Steinberg::Linux::IRunLoop* loop = host.editorRunLoop();
+    REQUIRE(loop != nullptr);
+    struct Tick : Steinberg::Linux::ITimerHandler {
+        int hits = 0;
+        Steinberg::tresult queryInterface(const Steinberg::TUID, void** obj) override {
+            if (obj)
+                *obj = nullptr;
+            return Steinberg::kNoInterface;
+        }
+        Steinberg::uint32 addRef() override { return 1; }
+        Steinberg::uint32 release() override { return 1; }
+        void onTimer() override { ++hits; }
+    } tick;
+    REQUIRE(loop->registerTimer(&tick, 0) == Steinberg::kResultOk);
+    host.pumpEditorRunLoop();
+    REQUIRE(tick.hits >= 1);
+    const int fired = tick.hits;
+    REQUIRE(loop->unregisterTimer(&tick) == Steinberg::kResultOk);
+    host.pumpEditorRunLoop();
+    REQUIRE(tick.hits == fired);
+    int pipes[2] = {-1, -1};
+    REQUIRE(::pipe(pipes) == 0);
+    struct Ready : Steinberg::Linux::IEventHandler {
+        int hits = 0;
+        Steinberg::tresult queryInterface(const Steinberg::TUID, void** obj) override {
+            if (obj)
+                *obj = nullptr;
+            return Steinberg::kNoInterface;
+        }
+        Steinberg::uint32 addRef() override { return 1; }
+        Steinberg::uint32 release() override { return 1; }
+        void onFDIsSet(Steinberg::Linux::FileDescriptor) override { ++hits; }
+    } ready;
+    REQUIRE(loop->registerEventHandler(&ready, pipes[0]) == Steinberg::kResultOk);
+    const char byte = 'x';
+    REQUIRE(::write(pipes[1], &byte, 1) == 1);
+    host.pumpEditorRunLoop();
+    REQUIRE(ready.hits == 1);
+    REQUIRE(loop->unregisterEventHandler(&ready) == Steinberg::kResultOk);
+    ::close(pipes[0]);
+    ::close(pipes[1]);
     XFree(kids);
     host.closeEditor(*device);
     count = 0;

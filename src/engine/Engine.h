@@ -20,6 +20,7 @@ public:
     ~Engine();
 
     void setPluginHost(std::shared_ptr<PluginHost> host);
+    void pumpEditors();
     void prepare(double sampleRate, int block);
     void release();
     void setProject(std::shared_ptr<Project> project);

@@ -1,6 +1,7 @@
 #include "ui/Paint.h"
 
 #include "dsp/Devices.h"
+#include "ui/Widgets.h"
 #include "engine/Engine.h"
 #include "model/Project.h"
 
@@ -222,14 +223,10 @@ void pill(Canvas& c, Rect r, const char* text, bool on) {
 }
 
 float dbNorm(float db) { return std::clamp((db + 60.f) / 66.f, 0.f, 1.f); }
-float knobNorm(float v) {
-    if (v >= 0.f && v <= 1.f)
-        return v;
-    if (v > 1.f && v <= 36.f)
-        return v / 36.f;
-    if (v > 36.f)
-        return std::clamp(std::log(std::max(20.f, v) / 20.f) / std::log(1000.f), 0.f, 1.f);
-    return dbNorm(v);
+
+void place(const Frame& f, const Control& control) {
+    if (f.widgets)
+        f.widgets->add(control);
 }
 
 
@@ -705,12 +702,34 @@ void mixer(Canvas& c, const Frame& f) {
             sendName = t->sends.front().target == "retB" ? "B" : "A";
         }
         const float sendY = r.y + 210.f;
-        darkKnob(c, r.x + r.w * 0.5f, sendY, 72.f, dbNorm(sendDb), sendName, sendDb <= -80.f ? "-inf" : paramText(sendDb));
+        const float sendNorm = dbNorm(sendDb);
+        darkKnob(c, r.x + r.w * 0.5f, sendY, 72.f, sendNorm, sendName, sendDb <= -80.f ? "-inf" : paramText(sendDb));
+        Control send;
+        send.id = "mix/" + t->id + "/send";
+        send.kind = ControlKind::Knob;
+        send.hit = {r.x + r.w * 0.5f - 36.f, sendY - 36.f, 72.f, 72.f};
+        send.norm = sendNorm;
+        send.value = sendDb <= -80.f ? -60.f : sendDb;
+        send.linear = true;
+        send.outMin = -60.f;
+        send.outMax = 6.f;
+        place(f, send);
 
         char pan[16];
         std::snprintf(pan, sizeof(pan), "%+.1f", t->pan);
         const float panY = r.y + 340.f;
-        darkKnob(c, r.x + r.w * 0.5f, panY, 72.f, (t->pan + 1.f) * 0.5f, "Pan", pan);
+        const float panNorm = (t->pan + 1.f) * 0.5f;
+        darkKnob(c, r.x + r.w * 0.5f, panY, 72.f, panNorm, "Pan", pan);
+        Control panCtl;
+        panCtl.id = "mix/" + t->id + "/pan";
+        panCtl.kind = ControlKind::Knob;
+        panCtl.hit = {r.x + r.w * 0.5f - 36.f, panY - 36.f, 72.f, 72.f};
+        panCtl.norm = panNorm;
+        panCtl.value = t->pan;
+        panCtl.linear = true;
+        panCtl.outMin = -1.f;
+        panCtl.outMax = 1.f;
+        place(f, panCtl);
         char db[16];
         std::snprintf(db, sizeof(db), "%+.1f dB", t->volumeDb);
         centered(c, db, r.x + r.w * 0.5f, panY + 78.f, 18.f, rod(), true);
@@ -735,10 +754,26 @@ void mixer(Canvas& c, const Frame& f) {
         }
         drawStereo(c, f, t->id, {r.x + r.w - 40.f, faderTop, 28.f, faderH}, 0.55f);
         const float bw = (r.w - 18.f) * 0.5f;
-        pill(c, {r.x + 6.f, r.y + r.h - 64.f, bw - 4.f, 24.f}, "S", t->solo);
-        pill(c, {r.x + 8.f + bw, r.y + r.h - 64.f, bw - 4.f, 24.f}, "C", false);
-        pill(c, {r.x + 6.f, r.y + r.h - 34.f, bw - 4.f, 24.f}, "Solo", t->solo);
-        pill(c, {r.x + 8.f + bw, r.y + r.h - 34.f, bw - 4.f, 24.f}, "Arm", t->arm);
+        const Rect sRect{r.x + 6.f, r.y + r.h - 64.f, bw - 4.f, 24.f};
+        const Rect cRect{r.x + 8.f + bw, r.y + r.h - 64.f, bw - 4.f, 24.f};
+        const Rect soloRect{r.x + 6.f, r.y + r.h - 34.f, bw - 4.f, 24.f};
+        const Rect armRect{r.x + 8.f + bw, r.y + r.h - 34.f, bw - 4.f, 24.f};
+        pill(c, sRect, "S", t->solo);
+        pill(c, cRect, "C", false);
+        pill(c, soloRect, "Solo", t->solo);
+        pill(c, armRect, "Arm", t->arm);
+        auto mixPill = [&](const char* which, Rect rect, bool on) {
+            Control ctl;
+            ctl.id = "mix/" + t->id + "/" + which;
+            ctl.kind = ControlKind::Pill;
+            ctl.hit = rect;
+            ctl.on = on;
+            place(f, ctl);
+        };
+        mixPill("s", sRect, t->solo);
+        mixPill("c", cRect, false);
+        mixPill("solo", soloRect, t->solo);
+        mixPill("arm", armRect, t->arm);
     }
 }
 
@@ -894,31 +929,37 @@ void goldJoin(Canvas& c, float x0, float x1, float y) {
 
 void deviceChain(Canvas& c, const Frame& f) {
     const float w = static_cast<float>(c.width());
+    const float h = static_cast<float>(c.height());
     const Track* chain = f.project ? f.project->findTrack("lead") : nullptr;
-    Rect box{16.f, kBarH + 24.f, w - 32.f, 392.f};
+    Rect box{16.f, kBarH + 12.f, w - 32.f, std::max(240.f, h - kBarH - 24.f)};
     panelBox(c, box, 10.f);
     c.drawText(chain ? chain->name.c_str() : "Lead", box.x + 16.f, box.y + 12.f, 18.f, ink(), true);
     if (!chain)
         return;
-    const float sideW = 176.f;
-    c.fillRect({box.x + box.w - sideW - 10.f, box.y + 12.f, 1.f, box.h - 24.f}, line());
-    const float cardW = 200.f;
-    const float gap = 32.f;
+    const float sideW = 200.f;
+    c.fillRect({box.x + box.w - sideW - 8.f, box.y + 12.f, 1.f, box.h - 24.f}, line());
+    const float gap = 28.f;
     const float top = box.y + 42.f;
     const float cardH = box.h - 56.f;
     const int n = static_cast<int>(chain->devices.size());
-    const float joinY = top + 64.f;
+    const float cardsW = box.w - sideW - 36.f;
+    const float cardW = n > 0 ? (cardsW - gap * static_cast<float>(std::max(0, n - 1))) / static_cast<float>(n) : 200.f;
+    const float knobD = 48.f;
+    const float dispTop = 36.f;
+    const float knobArea = knobD + 56.f;
+    const float dispH = std::max(120.f, cardH - dispTop - knobArea - 12.f);
+    const float joinY = top + dispTop + dispH * 0.5f;
     for (int i = 0; i < n; ++i) {
         const auto& d = chain->devices[static_cast<size_t>(i)];
         Rect r{box.x + 14.f + static_cast<float>(i) * (cardW + gap), top, cardW, cardH};
-        if (r.x + r.w > box.x + box.w - sideW - 18.f)
+        if (r.x + r.w > box.x + box.w - sideW - 12.f)
             break;
         panelBox(c, r, 8.f);
-        centered(c, d.name, r.x + r.w * 0.5f, r.y + 8.f, 18.f, ink(), true);
+        centered(c, d.name, r.x + r.w * 0.5f, r.y + 10.f, 18.f, ink(), true);
         const bool graph = d.type == "eq";
         const bool knobsOnly = d.type == "saturator" || d.type == "compressor" || d.type == "dyn";
         if (!knobsOnly)
-            drawChainDisplay(c, {r.x + 12.f, r.y + 34.f, r.w - 24.f, graph ? cardH - 50.f : 64.f}, d.type);
+            drawChainDisplay(c, {r.x + 12.f, r.y + dispTop, r.w - 24.f, graph ? cardH - 48.f : dispH}, d.type);
         if (!graph) {
             std::vector<std::pair<std::string, float>> knobs;
             const int limit = knobsOnly ? 4 : 2;
@@ -928,32 +969,47 @@ void deviceChain(Canvas& c, const Frame& f) {
                 knobs.push_back(pr);
             }
             const int count = static_cast<int>(knobs.size());
-            const float diameter = knobsOnly ? 64.f : 70.f;
             const int cols = count <= 1 ? 1 : 2;
+            const int rows = std::max(1, (count + cols - 1) / cols);
             for (int k = 0; k < count; ++k) {
                 const int col = k % cols;
                 const int row = k / cols;
-                const float cxk = r.x + (cols == 1 ? r.w * 0.5f : (col == 0 ? 56.f : r.w - 56.f));
-                const float cyk = knobsOnly ? r.y + 78.f + static_cast<float>(row) * 120.f
-                                            : r.y + 168.f + static_cast<float>(row) * 110.f;
-                darkKnob(c, cxk, cyk, diameter, knobNorm(knobs[static_cast<size_t>(k)].second),
-                         shortParam(knobs[static_cast<size_t>(k)].first), paramText(knobs[static_cast<size_t>(k)].second));
+                const float cxk = r.x + (cols == 1 ? r.w * 0.5f : (col == 0 ? r.w * 0.28f : r.w * 0.72f));
+                float cyk = r.y + dispTop + dispH + 8.f + knobD * 0.5f;
+                if (knobsOnly) {
+                    const float span = std::max(knobD, cardH - 72.f);
+                    cyk = r.y + 56.f + (static_cast<float>(row) + 0.5f) * (span / static_cast<float>(rows));
+                }
+                const float norm = knobNorm(knobs[static_cast<size_t>(k)].second);
+                darkKnob(c, cxk, cyk, knobD, norm, shortParam(knobs[static_cast<size_t>(k)].first),
+                         paramText(knobs[static_cast<size_t>(k)].second));
+                Control ctl;
+                ctl.id = "dev/" + d.id + "/" + knobs[static_cast<size_t>(k)].first;
+                ctl.kind = ControlKind::Knob;
+                ctl.hit = {cxk - knobD * 0.5f, cyk - knobD * 0.5f, knobD, knobD};
+                ctl.norm = norm;
+                ctl.value = knobs[static_cast<size_t>(k)].second;
+                ctl.anchor = ctl.value;
+                place(f, ctl);
             }
         }
         if (i + 1 < n) {
             const float nextX = r.x + cardW + gap;
-            if (nextX + cardW <= box.x + box.w - sideW - 18.f)
+            if (nextX + cardW <= box.x + box.w - sideW - 12.f)
                 goldJoin(c, r.x + r.w, nextX, joinY);
         }
     }
     Rect mod{box.x + box.w - sideW, box.y + 8.f, sideW - 8.f, box.h - 16.f};
     c.drawText("LFO", mod.x + 12.f, mod.y + 8.f, 18.f, ink(), true);
+    const float body = std::max(64.f, (mod.h - 150.f) / 3.f);
     c.drawText("Envelope", mod.x + 12.f, mod.y + 36.f, 18.f, dim(), false);
-    drawEnvelope(c, {mod.x + 12.f, mod.y + 60.f, mod.w - 24.f, 56.f});
-    c.drawText("LFO", mod.x + 12.f, mod.y + 128.f, 18.f, dim(), false);
-    drawLfo(c, {mod.x + 12.f, mod.y + 152.f, mod.w - 24.f, 56.f});
-    c.drawText("Envelope", mod.x + 12.f, mod.y + 220.f, 18.f, dim(), false);
-    drawEnvelope(c, {mod.x + 12.f, mod.y + 244.f, mod.w - 24.f, 64.f});
+    drawEnvelope(c, {mod.x + 12.f, mod.y + 58.f, mod.w - 24.f, body});
+    const float y2 = mod.y + 70.f + body;
+    c.drawText("LFO", mod.x + 12.f, y2, 18.f, dim(), false);
+    drawLfo(c, {mod.x + 12.f, y2 + 22.f, mod.w - 24.f, body});
+    const float y3 = y2 + 34.f + body;
+    c.drawText("Envelope", mod.x + 12.f, y3, 18.f, dim(), false);
+    drawEnvelope(c, {mod.x + 12.f, y3 + 22.f, mod.w - 24.f, std::max(64.f, mod.y + mod.h - y3 - 34.f)});
 }
 
 void piano(Canvas& c, const Frame& f) {
@@ -1193,14 +1249,28 @@ void preferences(Canvas& c, const Frame& f) {
     c.drawText(theme.name, editor.x + 110.f, editor.y + 12.f, 18.f, ink(), true);
     const Role shown[] = {Role::Bg, Role::Panel, Role::Ink, Role::Gold, Role::Amber, Role::Arc, Role::Knob, Role::Pointer, Role::Record};
     const char* names[] = {"Background", "Panel", "Text", "Gold", "Amber", "Arc", "Knob", "Pointer", "Clip"};
+    const char* keys[] = {"bg", "panel", "ink", "gold", "amber", "arc", "knob", "pointer", "record"};
     for (int i = 0; i < 9; ++i) {
         const float y = editor.y + 48.f + static_cast<float>(i) * 36.f;
         Rect sw{editor.x + 16.f, y, 28.f, 24.f};
         c.fillRoundRect(sw, 4.f, theme.color(shown[i]));
-        c.strokeRect(sw, line(), 1.f);
+        const std::string swatchId = std::string("theme/swatch/") + keys[i];
+        c.strokeRect(sw, f.widgets && f.widgets->isSelected(swatchId) ? gold() : line(), f.widgets && f.widgets->isSelected(swatchId) ? 2.f : 1.f);
         c.drawText(names[i], editor.x + 54.f, y + 2.f, 18.f, ink(), false);
-        const bool lock = shown[i] == Role::Gold || shown[i] == Role::Record || theme.locked[static_cast<int>(shown[i])];
-        pill(c, {editor.x + 220.f, y, 64.f, 24.f}, lock ? "Lock" : "Free", lock);
+        const bool lock = theme.locked[static_cast<int>(shown[i])] != 0;
+        Rect lockRect{editor.x + 220.f, y, 64.f, 24.f};
+        pill(c, lockRect, lock ? "Lock" : "Free", lock);
+        Control swatch;
+        swatch.id = swatchId;
+        swatch.kind = ControlKind::Button;
+        swatch.hit = sw;
+        place(f, swatch);
+        Control lockCtl;
+        lockCtl.id = std::string("theme/lock/") + keys[i];
+        lockCtl.kind = ControlKind::Pill;
+        lockCtl.hit = lockRect;
+        lockCtl.on = lock;
+        place(f, lockCtl);
     }
     Rect ramp{editor.x + 320.f, editor.y + 56.f, editor.w - 348.f, 120.f};
     c.fillRoundRect(ramp, 6.f, Color::argb(0xFF100E0C));
@@ -1224,23 +1294,68 @@ void preferences(Canvas& c, const Frame& f) {
     drawStereo(c, f, "master", {ramp.x + ramp.w - 36.f, editor.y + 200.f, 22.f, 160.f}, 0.7f);
     c.drawText("Live", ramp.x + ramp.w - 48.f, editor.y + 176.f, 18.f, dim(), false);
 
-    Rect dice{editor.x + 320.f, editor.y + 210.f, 280.f, 220.f};
+    Rect dice{editor.x + 320.f, editor.y + 210.f, 280.f, 280.f};
     c.drawText("Seed", dice.x, dice.y, 18.f, dim(), false);
-    c.fillRoundRect({dice.x, dice.y + 26.f, 180.f, 32.f}, 4.f, Color::argb(0xFF1A1612));
+    Rect seedRect{dice.x, dice.y + 26.f, 180.f, 32.f};
+    c.fillRoundRect(seedRect, 4.f, Color::argb(0xFF1A1612));
     char seed[24];
     std::snprintf(seed, sizeof(seed), "%llu", static_cast<unsigned long long>(theme.seed ? theme.seed : 0xC0FFEEULL));
-    c.drawText(seed, dice.x + 10.f, dice.y + 30.f, 18.f, ink(), true);
-    pill(c, {dice.x + 190.f, dice.y + 26.f, 80.f, 32.f}, "Dice", true);
-    pill(c, {dice.x, dice.y + 72.f, 140.f, 28.f}, "Brand band", theme.brandBand);
-    pill(c, {dice.x + 150.f, dice.y + 72.f, 120.f, 28.f}, "Contrast", theme.contrast);
-    c.drawText("Undo 50", dice.x, dice.y + 114.f, 18.f, rod(), true);
-    c.drawText("Redo", dice.x + 110.f, dice.y + 114.f, 18.f, dim(), false);
+    const std::string seedShown = f.widgets && !f.widgets->draft("theme/seed").empty() ? f.widgets->draft("theme/seed") : seed;
+    c.drawText(seedShown, dice.x + 10.f, dice.y + 30.f, 18.f, ink(), true);
+    Control seedCtl;
+    seedCtl.id = "theme/seed";
+    seedCtl.kind = ControlKind::Field;
+    seedCtl.hit = seedRect;
+    seedCtl.text = seedShown;
+    place(f, seedCtl);
+    Rect diceRect{dice.x + 190.f, dice.y + 26.f, 80.f, 32.f};
+    pill(c, diceRect, "Dice", true);
+    Control diceCtl;
+    diceCtl.id = "theme/dice";
+    diceCtl.kind = ControlKind::Button;
+    diceCtl.hit = diceRect;
+    place(f, diceCtl);
+    Rect brandRect{dice.x, dice.y + 72.f, 140.f, 28.f};
+    Rect contrastRect{dice.x + 150.f, dice.y + 72.f, 120.f, 28.f};
+    pill(c, brandRect, "Brand band", theme.brandBand);
+    pill(c, contrastRect, "Contrast", theme.contrast);
+    Control brand;
+    brand.id = "theme/brand";
+    brand.kind = ControlKind::Pill;
+    brand.hit = brandRect;
+    brand.on = theme.brandBand;
+    place(f, brand);
+    Control contrast;
+    contrast.id = "theme/contrast";
+    contrast.kind = ControlKind::Pill;
+    contrast.hit = contrastRect;
+    contrast.on = theme.contrast;
+    place(f, contrast);
+    Rect undoRect{dice.x, dice.y + 112.f, 96.f, 28.f};
+    Rect redoRect{dice.x + 106.f, dice.y + 112.f, 80.f, 28.f};
+    pill(c, undoRect, "Undo", false);
+    pill(c, redoRect, "Redo", false);
+    Control undo;
+    undo.id = "theme/undo";
+    undo.kind = ControlKind::Button;
+    undo.hit = undoRect;
+    place(f, undo);
+    Control redo;
+    redo.id = "theme/redo";
+    redo.kind = ControlKind::Button;
+    redo.hit = redoRect;
+    place(f, redo);
     int built = 0;
     for (const auto& id : Theme::builtinIds()) {
         if (built >= 6)
             break;
-        c.drawText(id.c_str(), dice.x, dice.y + 146.f + static_cast<float>(built) * 22.f, 18.f,
-                   id == theme.id ? gold() : dim(), id == theme.id);
+        Rect row{dice.x, dice.y + 150.f + static_cast<float>(built) * 24.f, 220.f, 22.f};
+        c.drawText(id.c_str(), row.x, row.y, 18.f, id == theme.id ? gold() : dim(), id == theme.id);
+        Control preset;
+        preset.id = "theme/preset/" + id;
+        preset.kind = ControlKind::Button;
+        preset.hit = row;
+        place(f, preset);
         ++built;
     }
     if (!f.prefMessage.empty())
@@ -1248,6 +1363,8 @@ void preferences(Canvas& c, const Frame& f) {
 }
 
 void paintFrame(Canvas& c, const Frame& frame) {
+    if (frame.widgets)
+        frame.widgets->begin();
     ThemeBind bind(frame.theme);
     c.clear(bg());
     topBar(c, frame);

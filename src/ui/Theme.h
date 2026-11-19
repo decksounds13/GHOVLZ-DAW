@@ -149,6 +149,11 @@ struct Theme {
     void bake() { meter.bake(); }
 };
 
+// WCAG contrast. contrastHolds() is the UI-23 sweep: record and clip stay red,
+// armed stays amber, and ink/dim stay readable on the background and panel.
+float contrastRatio(Color a, Color b);
+bool contrastHolds(const Theme& theme);
+
 struct EqRampStop {
     float pos = 0.f;
     uint32_t argb = 0xFF000000;

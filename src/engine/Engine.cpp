@@ -288,6 +288,11 @@ void Engine::releaseGraph() const {
 
 void Engine::setPluginHost(std::shared_ptr<PluginHost> host) { plugins_ = std::move(host); }
 
+void Engine::pumpEditors() {
+    if (plugins_)
+        plugins_->pumpEditorRunLoop();
+}
+
 void Engine::prepare(double sampleRate, int block) {
     sampleRate_ = sampleRate;
     block_ = block;

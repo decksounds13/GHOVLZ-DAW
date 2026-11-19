@@ -102,6 +102,8 @@ Theme themed(const char* id, const char* name, MeterStyle meter) {
     t.name = name;
     paintDefaults(t);
     t.meter = std::move(meter);
+    t.locked[static_cast<int>(Role::Gold)] = 1;
+    t.locked[static_cast<int>(Role::Record)] = 1;
     t.meter.bake();
     return t;
 }
@@ -583,9 +585,15 @@ Theme Theme::roll(const Theme& base, uint64_t seed, bool brandBandOn, bool contr
         }
         if (info.group == RoleGroup::Surface)
             t.color(info.role) = paint(0.04f, 0.16f);
-        else if (info.group == RoleGroup::Text)
-            t.color(info.role) = paint(contrastOn ? 0.82f : 0.35f, 0.98f);
-        else
+        else if (info.group == RoleGroup::Text) {
+            if (contrastOn) {
+                const float floor = info.role == Role::Dim ? 0.72f : 0.88f;
+                const float hue = h0 + rng.unit() * (h1 - h0);
+                t.color(info.role) = Color::argb(hsvToArgb(hue, rng.unit() * 0.18f, floor + rng.unit() * (0.98f - floor)));
+            } else {
+                t.color(info.role) = paint(0.35f, 0.98f);
+            }
+        } else
             t.color(info.role) = paint(0.45f, 0.9f);
     }
     for (auto& stop : t.meter.stops) {
@@ -600,6 +608,44 @@ Theme Theme::roll(const Theme& base, uint64_t seed, bool brandBandOn, bool contr
     t.name = "Dice";
     t.bake();
     return t;
+}
+
+namespace {
+
+float linearChannel(uint8_t channel) {
+    const float s = static_cast<float>(channel) / 255.f;
+    return s <= 0.04045f ? s / 12.92f : std::pow((s + 0.055f) / 1.055f, 2.4f);
+}
+
+bool sameRgb(Color color, uint32_t rgb) {
+    return color.r == static_cast<uint8_t>((rgb >> 16) & 255) && color.g == static_cast<uint8_t>((rgb >> 8) & 255) &&
+           color.b == static_cast<uint8_t>(rgb & 255);
+}
+
+} // namespace
+
+float contrastRatio(Color a, Color b) {
+    const float la = 0.2126f * linearChannel(a.r) + 0.7152f * linearChannel(a.g) + 0.0722f * linearChannel(a.b);
+    const float lb = 0.2126f * linearChannel(b.r) + 0.7152f * linearChannel(b.g) + 0.0722f * linearChannel(b.b);
+    const float hi = std::max(la, lb);
+    const float lo = std::min(la, lb);
+    return (hi + 0.05f) / (lo + 0.05f);
+}
+
+bool contrastHolds(const Theme& theme) {
+    if (!sameRgb(theme.color(Role::Record), 0xDC2828) || !sameRgb(theme.color(Role::Armed), 0xFF821E) ||
+        !sameRgb(theme.meter.clip, 0xDC2828))
+        return false;
+    const Role text[] = {Role::Ink, Role::Dim};
+    const Role ground[] = {Role::Bg, Role::Panel};
+    for (Role fg : text) {
+        for (Role bg : ground) {
+            const float need = fg == Role::Dim ? 3.f : 4.5f;
+            if (contrastRatio(theme.color(fg), theme.color(bg)) < need)
+                return false;
+        }
+    }
+    return true;
 }
 
 std::vector<Theme> importEqThemes(const std::string& xml) {

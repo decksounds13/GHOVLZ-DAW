@@ -3,10 +3,12 @@
 #include "ui/Canvas.h"
 #include "ui/Paint.h"
 #include "ui/Theme.h"
+#include "ui/Widgets.h"
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 
@@ -122,4 +124,119 @@ TEST_CASE("a meter ramp file loads the profile stops") {
     REQUIRE(same(loaded.meter.colorAt(-60.f), Color::argb(0xFF5C4B1F)));
     REQUIRE(same(loaded.meter.colorAt(6.f), Color::argb(0xFFDC2828)));
     std::filesystem::remove(path);
+}
+
+TEST_CASE("UI-23 contrast holds across 10000 seeds") {
+    const Theme base = Theme::defaultTheme();
+    for (int i = 1; i <= 10000; ++i) {
+        const uint64_t seed = static_cast<uint64_t>(i) * 0x9E3779B97F4A7C15ULL;
+        const bool brand = (i % 2) == 0;
+        const Theme rolled = Theme::roll(base, seed == 0 ? 1 : seed, brand, true);
+        REQUIRE(contrastHolds(rolled));
+        REQUIRE(rolled.seed == (seed == 0 ? 1 : seed));
+    }
+    const Theme quiet = Theme::roll(base, 7, true, false);
+    REQUIRE(quiet.contrast == false);
+}
+
+static void clickControl(Frame& frame, Project* project, ThemeProvider* themes, const Control& control) {
+    const float x = control.hit.x + control.hit.w * 0.5f;
+    const float y = control.hit.y + control.hit.h * 0.5f;
+    const std::shared_ptr<Project> keep;
+    uiPointer(frame, project, nullptr, keep, themes, PointerEvent{PointerEvent::Phase::Down, x, y, false});
+    uiPointer(frame, project, nullptr, keep, themes, PointerEvent{PointerEvent::Phase::Up, x, y, false});
+}
+
+TEST_CASE("widgets drag knobs and drive the theme editor") {
+    auto project = std::make_shared<Project>(Project::makeShowcase());
+    WidgetLayer layer;
+    Frame frame;
+    frame.project = project.get();
+    frame.widgets = &layer;
+    frame.view = View::Device;
+    auto canvas = makeSoftwareCanvas(1680, 980);
+    paintFrame(*canvas, frame);
+    const Control* knob = layer.find("dev/d-wt/position");
+    REQUIRE(knob);
+    REQUIRE(std::fabs(knob->hit.w - 48.f) < 0.1f);
+    REQUIRE(knob->hit.y > 640.f);
+    const float cx = knob->hit.x + knob->hit.w * 0.5f;
+    const float cy = knob->hit.y + knob->hit.h * 0.5f;
+    Track* lead = project->findTrack("lead");
+    REQUIRE(lead);
+    const float before = lead->devices[0].params.at("position");
+    const std::shared_ptr<Project> keep;
+    REQUIRE(uiPointer(frame, project.get(), nullptr, keep, nullptr, PointerEvent{PointerEvent::Phase::Down, cx, cy, false}));
+    REQUIRE(uiPointer(frame, project.get(), nullptr, keep, nullptr, PointerEvent{PointerEvent::Phase::Move, cx, cy - 80.f, false}));
+    const float coarse = lead->devices[0].params.at("position");
+    REQUIRE(coarse > before + 0.3f);
+    uiPointer(frame, project.get(), nullptr, keep, nullptr, PointerEvent{PointerEvent::Phase::Up, cx, cy - 80.f, false});
+    lead->devices[0].params["position"] = before;
+    paintFrame(*canvas, frame);
+    REQUIRE(uiPointer(frame, project.get(), nullptr, keep, nullptr, PointerEvent{PointerEvent::Phase::Down, cx, cy, false}));
+    REQUIRE(uiPointer(frame, project.get(), nullptr, keep, nullptr, PointerEvent{PointerEvent::Phase::Move, cx, cy - 80.f, true}));
+    const float fine = lead->devices[0].params.at("position");
+    REQUIRE(fine > before);
+    REQUIRE(fine < coarse);
+    uiPointer(frame, project.get(), nullptr, keep, nullptr, PointerEvent{PointerEvent::Phase::Up, cx, cy - 80.f, true});
+
+    frame.view = View::Mixer;
+    paintFrame(*canvas, frame);
+    const Control* pan = layer.find("mix/lead/pan");
+    REQUIRE(pan);
+    REQUIRE(std::fabs(pan->hit.w - 72.f) < 0.1f);
+    const float px = pan->hit.x + pan->hit.w * 0.5f;
+    const float py = pan->hit.y + pan->hit.h * 0.5f;
+    const float panBefore = lead->pan;
+    REQUIRE(uiPointer(frame, project.get(), nullptr, keep, nullptr, PointerEvent{PointerEvent::Phase::Down, px, py, false}));
+    REQUIRE(uiPointer(frame, project.get(), nullptr, keep, nullptr, PointerEvent{PointerEvent::Phase::Move, px, py - 40.f, false}));
+    REQUIRE(lead->pan > panBefore);
+    uiPointer(frame, project.get(), nullptr, keep, nullptr, PointerEvent{PointerEvent::Phase::Up, px, py - 40.f, false});
+    const Control* solo = layer.find("mix/lead/solo");
+    REQUIRE(solo);
+    REQUIRE(lead->solo == false);
+    clickControl(frame, project.get(), nullptr, *solo);
+    REQUIRE(lead->solo == true);
+
+    ThemeProvider themes;
+    frame.theme = &themes.current();
+    frame.view = View::Prefs;
+    paintFrame(*canvas, frame);
+    const Control* lock = layer.find("theme/lock/gold");
+    REQUIRE(lock);
+    REQUIRE(lock->on);
+    clickControl(frame, project.get(), &themes, *lock);
+    REQUIRE(themes.current().locked[static_cast<int>(Role::Gold)] == 0);
+    paintFrame(*canvas, frame);
+    const Control* seed = layer.find("theme/seed");
+    REQUIRE(seed);
+    clickControl(frame, project.get(), &themes, *seed);
+    REQUIRE(layer.focused() == "theme/seed");
+    for (int i = 0; i < 16; ++i)
+        uiKey(frame, project.get(), nullptr, keep, &themes, KeyEvent{0, true});
+    REQUIRE(uiKey(frame, project.get(), nullptr, keep, &themes, KeyEvent{'4', false}));
+    REQUIRE(uiKey(frame, project.get(), nullptr, keep, &themes, KeyEvent{'2', false}));
+    REQUIRE(layer.find("theme/seed")->text == "42");
+    const Control* dice = layer.find("theme/dice");
+    REQUIRE(dice);
+    clickControl(frame, project.get(), &themes, *dice);
+    REQUIRE(themes.current().seed == 42);
+    REQUIRE(contrastHolds(themes.current()));
+    const Control* undo = layer.find("theme/undo");
+    REQUIRE(undo);
+    clickControl(frame, project.get(), &themes, *undo);
+    REQUIRE(themes.current().seed != 42);
+    const Control* redo = layer.find("theme/redo");
+    REQUIRE(redo);
+    clickControl(frame, project.get(), &themes, *redo);
+    REQUIRE(themes.current().seed == 42);
+    paintFrame(*canvas, frame);
+    const Control* preset = layer.find("theme/preset/led-classic");
+    REQUIRE(preset);
+    clickControl(frame, project.get(), &themes, *preset);
+    REQUIRE(themes.current().id == "led-classic");
+    const Control* swatch = layer.find("theme/swatch/amber");
+    REQUIRE(swatch);
+    clickControl(frame, project.get(), &themes, *swatch);
+    REQUIRE(layer.isSelected("theme/swatch/amber"));
 }

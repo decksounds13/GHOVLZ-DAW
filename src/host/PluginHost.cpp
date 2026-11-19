@@ -11,7 +11,9 @@
 #include "pluginterfaces/vst/ivstmessage.h"
 #include "pluginterfaces/vst/ivstparameterchanges.h"
 #include "pluginterfaces/gui/iplugview.h"
+#include "pluginterfaces/gui/iplugviewcontentscalesupport.h"
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -728,6 +730,117 @@ std::shared_ptr<Device> PluginHost::instantiate(const std::string& pluginPath, s
     return nullptr;
 }
 
+struct PluginHost::EditorHost final : Steinberg::IPlugFrame, Steinberg::Linux::IRunLoop {
+    struct Timer {
+        Steinberg::Linux::ITimerHandler* handler = nullptr;
+        Steinberg::Linux::TimerInterval interval = 0;
+        std::chrono::steady_clock::time_point next {};
+    };
+    struct Fd {
+        Steinberg::Linux::IEventHandler* handler = nullptr;
+        Steinberg::Linux::FileDescriptor fd = -1;
+    };
+    std::vector<Timer> timers;
+    std::vector<Fd> fds;
+
+    Steinberg::tresult PLUGIN_API queryInterface(const Steinberg::TUID iid, void** obj) override {
+        const Steinberg::FUID id = Steinberg::FUID::fromTUID(iid);
+        if (id == Steinberg::IPlugFrame::iid || id == Steinberg::FUnknown::iid) {
+            *obj = static_cast<Steinberg::IPlugFrame*>(this);
+            return Steinberg::kResultOk;
+        }
+        if (id == Steinberg::Linux::IRunLoop::iid) {
+            *obj = static_cast<Steinberg::Linux::IRunLoop*>(this);
+            return Steinberg::kResultOk;
+        }
+        *obj = nullptr;
+        return Steinberg::kNoInterface;
+    }
+    Steinberg::uint32 PLUGIN_API addRef() override { return 1000; }
+    Steinberg::uint32 PLUGIN_API release() override { return 1000; }
+    Steinberg::tresult PLUGIN_API resizeView(Steinberg::IPlugView* view, Steinberg::ViewRect* size) override {
+        if (!view || !size)
+            return Steinberg::kInvalidArgument;
+        return view->onSize(size);
+    }
+    Steinberg::tresult PLUGIN_API registerEventHandler(Steinberg::Linux::IEventHandler* handler, Steinberg::Linux::FileDescriptor fd) override {
+        if (!handler || fd < 0)
+            return Steinberg::kInvalidArgument;
+        for (const auto& slot : fds)
+            if (slot.handler == handler)
+                return Steinberg::kResultFalse;
+        fds.push_back(Fd{handler, fd});
+        return Steinberg::kResultOk;
+    }
+    Steinberg::tresult PLUGIN_API unregisterEventHandler(Steinberg::Linux::IEventHandler* handler) override {
+        const auto before = fds.size();
+        fds.erase(std::remove_if(fds.begin(), fds.end(), [&](const Fd& slot) { return slot.handler == handler; }), fds.end());
+        return fds.size() == before ? Steinberg::kResultFalse : Steinberg::kResultOk;
+    }
+    Steinberg::tresult PLUGIN_API registerTimer(Steinberg::Linux::ITimerHandler* handler, Steinberg::Linux::TimerInterval milliseconds) override {
+        if (!handler)
+            return Steinberg::kInvalidArgument;
+        for (const auto& slot : timers)
+            if (slot.handler == handler)
+                return Steinberg::kResultFalse;
+        Timer timer;
+        timer.handler = handler;
+        timer.interval = milliseconds;
+        timer.next = std::chrono::steady_clock::now();
+        if (milliseconds > 0)
+            timer.next += std::chrono::milliseconds(milliseconds);
+        timers.push_back(timer);
+        return Steinberg::kResultOk;
+    }
+    Steinberg::tresult PLUGIN_API unregisterTimer(Steinberg::Linux::ITimerHandler* handler) override {
+        const auto before = timers.size();
+        timers.erase(std::remove_if(timers.begin(), timers.end(), [&](const Timer& slot) { return slot.handler == handler; }),
+                     timers.end());
+        return timers.size() == before ? Steinberg::kResultFalse : Steinberg::kResultOk;
+    }
+    void pump() {
+        const auto now = std::chrono::steady_clock::now();
+        const std::vector<Timer> due = timers;
+        for (const auto& slot : due) {
+            if (slot.next > now)
+                continue;
+            auto live = std::find_if(timers.begin(), timers.end(), [&](const Timer& timer) { return timer.handler == slot.handler; });
+            if (live == timers.end())
+                continue;
+            live->handler->onTimer();
+            live = std::find_if(timers.begin(), timers.end(), [&](const Timer& timer) { return timer.handler == slot.handler; });
+            if (live == timers.end())
+                continue;
+            live->next = now;
+            if (live->interval > 0)
+                live->next += std::chrono::milliseconds(live->interval);
+        }
+#if !defined(_WIN32)
+        if (fds.empty())
+            return;
+        std::vector<pollfd> pollfds(fds.size());
+        for (size_t i = 0; i < fds.size(); ++i) {
+            pollfds[i].fd = fds[i].fd;
+            pollfds[i].events = POLLIN;
+            pollfds[i].revents = 0;
+        }
+        if (poll(pollfds.data(), static_cast<nfds_t>(pollfds.size()), 0) <= 0)
+            return;
+        const std::vector<Fd> current = fds;
+        for (size_t i = 0; i < current.size() && i < pollfds.size(); ++i) {
+            if ((pollfds[i].revents & (POLLIN | POLLHUP)) == 0)
+                continue;
+            auto live = std::find_if(fds.begin(), fds.end(), [&](const Fd& fd) { return fd.handler == current[i].handler; });
+            if (live != fds.end())
+                live->handler->onFDIsSet(live->fd);
+        }
+#endif
+    }
+};
+
+PluginHost::PluginHost() : editors_(std::make_unique<EditorHost>()) {}
+PluginHost::~PluginHost() = default;
+
 void PluginHost::setState(Device& device, const std::string& encoded) { device.setPluginState(encoded); }
 std::string PluginHost::stateOf(const Device& device) const { return device.pluginState(); }
 
@@ -766,6 +879,7 @@ bool PluginHost::openEditor(Device& device, void* parent, EditorAttach& out, std
     }
     out.width = rect.getWidth();
     out.height = rect.getHeight();
+    vst->view->setFrame(editors_.get());
     if (vst->view->attached(parent, platform) != Steinberg::kResultOk) {
         error = "attach failed";
         vst->view.reset();
@@ -774,6 +888,43 @@ bool PluginHost::openEditor(Device& device, void* parent, EditorAttach& out, std
     vst->editorParent = parent;
     out.open = true;
     return true;
+}
+
+bool PluginHost::setEditorScale(Device& device, float factor, int& width, int& height, std::string& error) {
+    auto* vst = dynamic_cast<Vst3Device*>(&device);
+    if (!vst || !vst->view) {
+        error = "no editor";
+        return false;
+    }
+    Steinberg::IPlugViewContentScaleSupport* scale = nullptr;
+    if (vst->view->queryInterface(Steinberg::IPlugViewContentScaleSupport::iid, reinterpret_cast<void**>(&scale)) != Steinberg::kResultOk ||
+        !scale) {
+        error = "no content scale";
+        return false;
+    }
+    const Steinberg::tresult result = scale->setContentScaleFactor(factor);
+    scale->release();
+    if (result != Steinberg::kResultOk) {
+        error = "scale refused";
+        return false;
+    }
+    Steinberg::ViewRect rect;
+    if (vst->view->getSize(&rect) != Steinberg::kResultOk) {
+        error = "scaled size missing";
+        return false;
+    }
+    width = rect.getWidth();
+    height = rect.getHeight();
+    return true;
+}
+
+void PluginHost::pumpEditorRunLoop() {
+    if (editors_)
+        editors_->pump();
+}
+
+Steinberg::Linux::IRunLoop* PluginHost::editorRunLoop() const {
+    return editors_.get();
 }
 
 bool PluginHost::resizeEditor(Device& device, int width, int height, std::string& error) {
