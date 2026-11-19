@@ -1,0 +1,9 @@
+build/
+build-*/
+.vs/
+.idea/
+CMakeUserPresets.json
+*.user
+.DS_Store
+*.vst3
+!docs/screenshots/**
